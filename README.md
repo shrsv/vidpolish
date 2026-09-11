@@ -37,8 +37,9 @@ command, without you touching a timeline editor.
 ## Prerequisites
 
 You need Go and `ffmpeg` installed before building or running vidpolish.
-Everything else (`deep-filter`, `auto-editor`) is fetched automatically the
-first time you run the tool, so you do not need to install those by hand.
+Everything else (`deep-filter`, `auto-editor`, `resvg`, the Inter font) is
+fetched automatically the first time you run the tool, so you do not need
+to install those by hand.
 
 | Tool | Why it's needed | How to get it |
 | --- | --- | --- |
@@ -46,9 +47,19 @@ first time you run the tool, so you do not need to install those by hand.
 | `ffmpeg` / `ffprobe` | splitting, remuxing, and probing video/audio | `apt install ffmpeg`, `brew install ffmpeg`, or download from [ffmpeg.org](https://ffmpeg.org/download.html) |
 | `deep-filter` | audio denoising | downloaded automatically by vidpolish from the [DeepFilterNet releases](https://github.com/Rikorose/DeepFilterNet/releases) into `~/.cache/vidpolish/bin` |
 | `auto-editor` | silence cutting and speed changes | downloaded automatically by vidpolish from the [auto-editor releases](https://github.com/WyattBlue/auto-editor/releases) into `~/.cache/vidpolish/bin` |
+| `resvg` | rasterizing auto-generated YouTube thumbnails | downloaded automatically by vidpolish from the [resvg releases](https://github.com/linebender/resvg/releases) into `~/.cache/vidpolish/bin` on Linux/macOS; see the platform note below for Windows/linux-arm64 |
+| Inter font | text rendering inside generated thumbnails | downloaded automatically by vidpolish from the [Inter releases](https://github.com/rsms/inter/releases) into `~/.cache/vidpolish/fonts` |
 
-Supported platforms for the auto-downloaded binaries: Linux (x86_64,
-aarch64), macOS (Intel and Apple Silicon), and Windows (x86_64).
+Supported platforms for the auto-downloaded `deep-filter`/`auto-editor`
+binaries: Linux (x86_64, aarch64), macOS (Intel and Apple Silicon), and
+Windows (x86_64).
+
+`resvg` (used only for thumbnail generation) has narrower prebuilt
+coverage: Linux x86_64 and macOS (Intel and Apple Silicon) auto-download;
+Windows and Linux aarch64 have no official prebuilt binary, so on those
+platforms install `resvg` yourself (e.g. `cargo install resvg`, or a
+package manager) and make sure it's on PATH. Every other vidpolish feature
+works normally regardless; only thumbnail generation is affected.
 
 ### Check and install everything in one go
 
@@ -70,6 +81,8 @@ ffmpeg       /usr/bin/ffmpeg
 ffprobe      /usr/bin/ffprobe
 deep-filter  /home/you/.cache/vidpolish/bin/deep-filter/0.5.6/deep-filter
 auto-editor  /home/you/.cache/vidpolish/bin/auto-editor/31.6.0/auto-editor
+resvg        /home/you/.cache/vidpolish/bin/resvg/0.48.1/resvg
+font         /home/you/.cache/vidpolish/fonts/inter-4.1/Inter-Regular.ttf, /home/you/.cache/vidpolish/fonts/inter-4.1/Inter-Bold.ttf
 ```
 
 If `ffmpeg`/`ffprobe` are missing, `deps` tells you to install them; it will
@@ -304,12 +317,8 @@ directly) rather than failing silently. Verify your channel from YouTube
 Studio if you hit this. The video itself still uploads fine either way;
 only the custom thumbnail step is affected.
 
-**Platform note**: resvg auto-downloads on Linux and macOS (x86_64/arm64).
-It doesn't publish a Windows or linux/arm64 binary, so on those platforms
-`vidpolish deps`/thumbnail generation expects `resvg` to already be on
-PATH (e.g. `cargo install resvg`, or a package manager). Everything else
-in vidpolish works normally either way; thumbnail generation is the only
-feature affected.
+See the Prerequisites table above for resvg's platform coverage and the
+manual-install fallback on Windows/linux-arm64.
 
 YouTube's own AI/suggested-thumbnail feature (in Studio) isn't reachable
 through the public Data API, so vidpolish can't tap into it directly;
