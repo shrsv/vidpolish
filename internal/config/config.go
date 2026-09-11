@@ -17,11 +17,30 @@ type YouTube struct {
 	RefreshToken    string `toml:"refresh_token"`
 	Privacy         string `toml:"privacy"`
 	DefaultLanguage string `toml:"default_language"`
+
+	// DefaultTags are merged with the fixed "vidpolish" tag on every
+	// upload.
+	DefaultTags []string `toml:"default_tags"`
+
+	// DescriptionTemplate is rendered with Go's text/template, given
+	// {{.Title}}. If the rendered result doesn't contain the literal
+	// word "vidpolish", it is appended automatically.
+	DescriptionTemplate string `toml:"description_template"`
+}
+
+// Thumbnail configures auto-generated YouTube thumbnails.
+type Thumbnail struct {
+	Enabled         bool   `toml:"enabled"`
+	LogoPath        string `toml:"logo_path"`
+	BackgroundColor string `toml:"background_color"`
+	AccentColor     string `toml:"accent_color"`
+	TextColor       string `toml:"text_color"`
 }
 
 // Config is the top-level vidpolish configuration.
 type Config struct {
-	YouTube YouTube `toml:"youtube"`
+	YouTube   YouTube   `toml:"youtube"`
+	Thumbnail Thumbnail `toml:"thumbnail"`
 }
 
 const template = `[youtube]
@@ -39,6 +58,26 @@ privacy = "unlisted"
 # Fallback for the uploaded video's snippet.defaultLanguage and
 # snippet.defaultAudioLanguage (BCP-47 code, e.g. "en", "en-IN").
 default_language = "en"
+
+# Tags merged with the fixed "vidpolish" tag on every upload.
+default_tags = []
+
+# Rendered with Go's text/template; {{.Title}} is available. The word
+# "vidpolish" is always appended if missing from the rendered result.
+description_template = "{{.Title}}\n\nvidpolish"
+
+[thumbnail]
+# Auto-generate a thumbnail (brand background + optional logo + title)
+# and set it on every upload.
+enabled = true
+
+# Local PNG/JPG/SVG logo file to composite onto the thumbnail. Empty = no
+# logo, title text only.
+logo_path = ""
+
+background_color = "#0f172a"
+accent_color     = "#22d3ee"
+text_color       = "#ffffff"
 `
 
 // Path returns the path to ~/.vidpolish/config.toml.
@@ -92,6 +131,18 @@ func Load() (*Config, error) {
 	}
 	if cfg.YouTube.DefaultLanguage == "" {
 		cfg.YouTube.DefaultLanguage = "en"
+	}
+	if cfg.YouTube.DescriptionTemplate == "" {
+		cfg.YouTube.DescriptionTemplate = "{{.Title}}\n\nvidpolish"
+	}
+	if cfg.Thumbnail.BackgroundColor == "" {
+		cfg.Thumbnail.BackgroundColor = "#0f172a"
+	}
+	if cfg.Thumbnail.AccentColor == "" {
+		cfg.Thumbnail.AccentColor = "#22d3ee"
+	}
+	if cfg.Thumbnail.TextColor == "" {
+		cfg.Thumbnail.TextColor = "#ffffff"
 	}
 	return &cfg, nil
 }

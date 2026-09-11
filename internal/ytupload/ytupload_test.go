@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -151,5 +153,67 @@ func TestStartSessionMissingLocationErrors(t *testing.T) {
 
 	if _, err := startSession(Options{}, 1); err == nil {
 		t.Fatal("expected error for missing Location header")
+	}
+}
+
+func TestSetThumbnailSendsPNGBytes(t *testing.T) {
+	origThumbnailSetURL := thumbnailSetURL
+	t.Cleanup(func() { thumbnailSetURL = origThumbnailSetURL })
+
+	want := []byte{0x89, 'P', 'N', 'G', 1, 2, 3}
+	var gotBody []byte
+	var gotContentType, gotVideoIDQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentType = r.Header.Get("Content-Type")
+		gotVideoIDQuery = r.URL.Query().Get("videoId")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.WriteHeader(200)
+	}))
+	defer server.Close()
+	thumbnailSetURL = server.URL + "?videoId="
+
+	path := filepath.Join(t.TempDir(), "thumb.png")
+	if err := os.WriteFile(path, want, 0o644); err != nil {
+		t.Fatalf("writing test thumbnail: %v", err)
+	}
+
+	if err := setThumbnail("token123", "vid1", path); err != nil {
+		t.Fatalf("setThumbnail: %v", err)
+	}
+	if string(gotBody) != string(want) {
+		t.Fatalf("uploaded body = %v, want %v", gotBody, want)
+	}
+	if gotContentType != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", gotContentType)
+	}
+	if gotVideoIDQuery != "vid1" {
+		t.Fatalf("videoId query = %q, want vid1", gotVideoIDQuery)
+	}
+}
+
+func TestSetThumbnailSurfacesAPIError(t *testing.T) {
+	origThumbnailSetURL := thumbnailSetURL
+	t.Cleanup(func() { thumbnailSetURL = origThumbnailSetURL })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		w.Write([]byte(`{"error":{"message":"youtubeSignupRequired: phone verification required"}}`))
+	}))
+	defer server.Close()
+	thumbnailSetURL = server.URL + "?videoId="
+
+	path := filepath.Join(t.TempDir(), "thumb.png")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatalf("writing test thumbnail: %v", err)
+	}
+
+	err := setThumbnail("token123", "vid1", path)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "phone verification") {
+		t.Fatalf("error %q should surface the raw API message naming phone verification", err.Error())
 	}
 }

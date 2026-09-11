@@ -18,11 +18,12 @@ import (
 	"time"
 )
 
-// insertURL and listURL are vars (not consts) so tests can point them at
-// an httptest.Server instead of the real YouTube API.
+// insertURL, listURL, and thumbnailSetURL are vars (not consts) so tests
+// can point them at an httptest.Server instead of the real YouTube API.
 var (
-	insertURL = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
-	listURL   = "https://www.googleapis.com/youtube/v3/videos?part=status,processingDetails&id="
+	insertURL       = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
+	listURL         = "https://www.googleapis.com/youtube/v3/videos?part=status,processingDetails&id="
+	thumbnailSetURL = "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId="
 )
 
 const chunkSize = 8 << 20 // 8 MiB
@@ -35,6 +36,13 @@ type Options struct {
 	Tags        []string
 	Privacy     string // public | unlisted | private
 	Language    string // BCP-47, e.g. "en", "en-IN"; empty to skip
+
+	// ThumbnailPath, if set, is uploaded as the video's custom thumbnail
+	// right after the video ID is known. Setting a custom thumbnail via
+	// the API requires the channel to have phone verification enabled;
+	// if that's missing, YouTube's own error names it, and that raw
+	// error text is surfaced rather than a generic wrapped one.
+	ThumbnailPath string
 
 	// NoWait skips polling for YouTube's initial processing status after
 	// the upload completes.
@@ -105,6 +113,12 @@ func Upload(path string, opts Options) (*Result, error) {
 	}
 	if opts.OnUploaded != nil {
 		opts.OnUploaded(result)
+	}
+
+	if opts.ThumbnailPath != "" {
+		if err := setThumbnail(opts.AccessToken, video.ID, opts.ThumbnailPath); err != nil {
+			return result, fmt.Errorf("video uploaded (%s) but setting the thumbnail failed: %w", result.URL, err)
+		}
 	}
 
 	if !opts.NoWait {
@@ -217,6 +231,35 @@ func uploadChunks(sessionURI string, f *os.File, size int64, opts Options) (*ins
 	}
 
 	return nil, fmt.Errorf("upload ended without a final response")
+}
+
+// setThumbnail uploads the PNG at path as videoID's custom thumbnail.
+// This requires the channel to have phone verification enabled; when
+// that's missing, YouTube's API error names it directly, so the raw
+// response body is surfaced rather than a generic wrapped message.
+func setThumbnail(accessToken, videoID, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading thumbnail: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, thumbnailSetURL+videoID, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "image/png")
+	req.ContentLength = int64(len(data))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("setting thumbnail: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("setting thumbnail: %s: %s", resp.Status, readErrBody(resp))
+	}
+	return nil
 }
 
 // waitForProcessing polls YouTube for up to ~2 minutes so the caller can

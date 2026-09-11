@@ -95,3 +95,43 @@ func autoEditorBinName() string {
 	}
 	return "auto-editor"
 }
+
+// resvgAsset returns the GitHub release download URL for the resvg CLI
+// binary matching the current OS/arch. resvg only publishes prebuilt
+// binaries for linux/amd64 and darwin (amd64/arm64); other platforms are
+// expected to have resvg installed manually and on PATH.
+func resvgAsset(version string) (url, archiveExt string, err error) {
+	return resvgAssetFor(runtime.GOOS, runtime.GOARCH, version)
+}
+
+func resvgAssetFor(goos, goarch, version string) (url, archiveExt string, err error) {
+	var name, ext string
+	switch goos {
+	case "linux":
+		if goarch != "amd64" {
+			return "", "", fmt.Errorf("resvg publishes no linux/%s binary", goarch)
+		}
+		name, ext = "resvg-linux-x86_64.tar.gz", "tar.gz"
+	case "darwin":
+		switch goarch {
+		case "amd64":
+			name, ext = "resvg-macos-x86_64.zip", "zip"
+		case "arm64":
+			name, ext = "resvg-macos-aarch64.zip", "zip"
+		default:
+			return "", "", fmt.Errorf("resvg publishes no darwin/%s binary", goarch)
+		}
+	default:
+		return "", "", fmt.Errorf("resvg publishes no %s binary", goos)
+	}
+
+	url = fmt.Sprintf("https://github.com/linebender/resvg/releases/download/v%s/%s", version, name)
+	return url, ext, nil
+}
+
+func resvgBinName() string {
+	if runtime.GOOS == "windows" {
+		return "resvg.exe"
+	}
+	return "resvg"
+}

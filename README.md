@@ -230,8 +230,9 @@ YouTube (for up to about two minutes) so you can see when it finishes
 transcoding. Skip that wait entirely with `--no-wait`, and the command
 returns right after the `uploaded:` line.
 
-The description and tags on uploaded videos just contain `vidpolish`; fill
-in anything else you want from YouTube Studio afterward.
+By default the description and tags contain just `vidpolish`; see the
+next section for setting your own defaults. Fill in anything else you
+want from YouTube Studio afterward.
 
 ### `upload` / `process --upload` flags
 
@@ -241,6 +242,70 @@ in anything else you want from YouTube Studio afterward.
 | `--privacy` | from config (`unlisted`) | `public`, `unlisted`, or `private`. |
 | `--language` | from config (`en`) | BCP-47 language code, e.g. `en`, `en-IN`. |
 | `--no-wait` | off | Return right after the upload finishes instead of also waiting on YouTube's processing status. |
+| `--thumbnail <path>` | none | Use a specific pre-made image as the thumbnail instead of auto-generating one. |
+| `--no-thumbnail` | off | Don't set a thumbnail for this upload, even if auto-generation is enabled in config. |
+
+### Default tags and description
+
+Two `[youtube]` fields in `~/.vidpolish/config.toml` control what goes on
+every upload beyond the title:
+
+```toml
+default_tags        = ["golang", "screencast"]
+description_template = "{{.Title}}\n\nvidpolish"
+```
+
+`default_tags` is merged with a fixed `vidpolish` tag (which is always
+included) on every upload. `description_template` is rendered with Go's
+`text/template`, given `{{.Title}}` as the resolved video title; if the
+rendered result doesn't contain the word `vidpolish`, it's appended
+automatically so that tag is always present even if you edit the template.
+
+### Auto-generated thumbnails
+
+vidpolish can generate a 1280x720 thumbnail for every upload: a brand
+background, your logo in a corner, and the video title laid out with a
+title-fitting pass that shrinks the font and wraps across up to three
+lines for longer titles, truncating with an ellipsis only as a last
+resort. It's built as an SVG (so it stays human-inspectable/tweakable) and
+rasterized with [resvg](https://github.com/linebender/resvg).
+
+Configure it under `[thumbnail]` in `~/.vidpolish/config.toml`:
+
+```toml
+[thumbnail]
+enabled           = true
+logo_path         = "/path/to/your/logo.svg"   # PNG/JPG also accepted; empty = no logo
+background_color  = "#0f172a"
+accent_color      = "#22d3ee"
+text_color        = "#ffffff"
+```
+
+`logo_path` is entirely up to you; an SVG logo is rasterized automatically
+(and cached) the first time it's used. With `[thumbnail].enabled = true`,
+every `upload`/`process --upload` generates and sets a thumbnail unless
+you pass `--thumbnail <path>` (use your own image) or `--no-thumbnail`
+(skip it for this run). The generated PNG is saved next to the uploaded
+video as `<name>-thumbnail.png`, along with its source `.svg`.
+
+**Custom thumbnails require phone verification on your channel.** This is
+a real YouTube API requirement, not a vidpolish limitation: if your
+channel hasn't verified a phone number, `thumbnails.set` will fail and
+vidpolish surfaces YouTube's own error text (which names the requirement
+directly) rather than failing silently. Verify your channel from YouTube
+Studio if you hit this. The video itself still uploads fine either way;
+only the custom thumbnail step is affected.
+
+**Platform note**: resvg auto-downloads on Linux and macOS (x86_64/arm64).
+It doesn't publish a Windows or linux/arm64 binary, so on those platforms
+`vidpolish deps`/thumbnail generation expects `resvg` to already be on
+PATH (e.g. `cargo install resvg`, or a package manager). Everything else
+in vidpolish works normally either way; thumbnail generation is the only
+feature affected.
+
+YouTube's own AI/suggested-thumbnail feature (in Studio) isn't reachable
+through the public Data API, so vidpolish can't tap into it directly;
+this generated-thumbnail approach is the alternative.
 
 ### About automatic captions
 
@@ -257,12 +322,13 @@ on any particular schedule.
 
 ```
 cmd/vidpolish        CLI entrypoint (flag parsing, wiring)
-internal/binmgr       resolves/downloads deep-filter and auto-editor
+internal/binmgr       resolves/downloads deep-filter, auto-editor, resvg, and the Inter font
 internal/cache        the ~/.vidpolish/cache artifact cache
 internal/config       ~/.vidpolish/config.toml load/init/save
 internal/pipeline     the split / denoise / remux / auto-edit stages
+internal/thumbnail    SVG-based thumbnail generation, rasterized via resvg
 internal/ytauth       YouTube OAuth 2.0 installed-app login flow
-internal/ytupload     resumable YouTube upload with progress/ETA
+internal/ytupload     resumable YouTube upload with progress/ETA and thumbnail set
 media/                logo assets
 ```
 
@@ -270,7 +336,8 @@ media/                logo assets
 
 vidpolish covers the local processing pipeline (split, denoise, cut,
 optional speed changes, with caching) and uploading the result to YouTube
-as unlisted-by-default with progress, ETA, and language metadata.
+as unlisted-by-default, with progress, ETA, language metadata, default
+tags/description, and an auto-generated thumbnail.
 
 Planned next:
 

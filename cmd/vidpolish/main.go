@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 
 	"vidpolish/internal/binmgr"
 	"vidpolish/internal/cache"
 	"vidpolish/internal/config"
 	"vidpolish/internal/pipeline"
+	"vidpolish/internal/thumbnail"
 	"vidpolish/internal/ytauth"
 	"vidpolish/internal/ytupload"
 )
@@ -67,6 +69,8 @@ func runProcess(args []string) {
 	privacy := fs.String("privacy", "", "YouTube privacy if --upload is set: public, unlisted, or private (default: from config)")
 	language := fs.String("language", "", "YouTube video language if --upload is set (default: from config)")
 	noWait := fs.Bool("no-wait", false, "if --upload is set, skip waiting for YouTube processing status")
+	thumbnailPath := fs.String("thumbnail", "", "if --upload is set, use this image as the thumbnail instead of auto-generating one")
+	noThumbnail := fs.Bool("no-thumbnail", false, "if --upload is set, don't set a thumbnail even if auto-generation is enabled in config")
 	// flag.Parse stops at the first non-flag argument, so reorder to let the
 	// input path appear anywhere on the command line (before or after flags).
 	fs.Parse(reorderFlags(args))
@@ -94,7 +98,14 @@ func runProcess(args []string) {
 	fmt.Println("done:", out)
 
 	if *upload {
-		doUpload(out, *title, *privacy, *language, *noWait)
+		doUpload(out, uploadFlags{
+			Title:         *title,
+			Privacy:       *privacy,
+			Language:      *language,
+			NoWait:        *noWait,
+			ThumbnailPath: *thumbnailPath,
+			NoThumbnail:   *noThumbnail,
+		})
 	}
 }
 
@@ -146,16 +157,36 @@ func runUpload(args []string) {
 	privacy := fs.String("privacy", "", "YouTube privacy: public, unlisted, or private (default: from config)")
 	language := fs.String("language", "", "YouTube video language, e.g. en, en-IN (default: from config)")
 	noWait := fs.Bool("no-wait", false, "skip waiting for YouTube processing status after upload")
+	thumbnailPath := fs.String("thumbnail", "", "use this image as the thumbnail instead of auto-generating one")
+	noThumbnail := fs.Bool("no-thumbnail", false, "don't set a thumbnail even if auto-generation is enabled in config")
 	fs.Parse(reorderFlags(args))
 
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: vidpolish upload <video.mp4> [flags]")
 		os.Exit(1)
 	}
-	doUpload(fs.Arg(0), *title, *privacy, *language, *noWait)
+	doUpload(fs.Arg(0), uploadFlags{
+		Title:         *title,
+		Privacy:       *privacy,
+		Language:      *language,
+		NoWait:        *noWait,
+		ThumbnailPath: *thumbnailPath,
+		NoThumbnail:   *noThumbnail,
+	})
 }
 
-func doUpload(path, title, privacy, language string, noWait bool) {
+// uploadFlags carries the upload-related CLI flags shared by "process
+// --upload" and "upload" so both funnel through the same doUpload logic.
+type uploadFlags struct {
+	Title         string
+	Privacy       string
+	Language      string
+	NoWait        bool
+	ThumbnailPath string
+	NoThumbnail   bool
+}
+
+func doUpload(path string, f uploadFlags) {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -165,9 +196,12 @@ func doUpload(path, title, privacy, language string, noWait bool) {
 		fmt.Fprintln(os.Stderr, "error: not logged in, run: vidpolish youtube login")
 		os.Exit(1)
 	}
+
+	title := f.Title
 	if title == "" {
 		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
+	privacy := f.Privacy
 	if privacy == "" {
 		privacy = cfg.YouTube.Privacy
 	}
@@ -175,8 +209,29 @@ func doUpload(path, title, privacy, language string, noWait bool) {
 		fmt.Fprintln(os.Stderr, "error: --privacy must be public, unlisted, or private")
 		os.Exit(1)
 	}
+	language := f.Language
 	if language == "" {
 		language = cfg.YouTube.DefaultLanguage
+	}
+
+	tags := buildTags(cfg.YouTube.DefaultTags)
+	description := buildDescription(cfg.YouTube.DescriptionTemplate, title)
+
+	thumbnailPath := f.ThumbnailPath
+	if thumbnailPath == "" && !f.NoThumbnail && cfg.Thumbnail.Enabled {
+		thumbnailPath, err = thumbnail.Generate(thumbnail.Options{
+			Title:           title,
+			LogoPath:        cfg.Thumbnail.LogoPath,
+			BackgroundColor: cfg.Thumbnail.BackgroundColor,
+			AccentColor:     cfg.Thumbnail.AccentColor,
+			TextColor:       cfg.Thumbnail.TextColor,
+			OutPath:         strings.TrimSuffix(path, filepath.Ext(path)) + "-thumbnail.png",
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error generating thumbnail:", err)
+			os.Exit(1)
+		}
+		fmt.Println("==> generated thumbnail:", thumbnailPath)
 	}
 
 	accessToken, err := ytauth.AccessToken(cfg.YouTube.ClientID, cfg.YouTube.ClientSecret, cfg.YouTube.RefreshToken)
@@ -187,13 +242,14 @@ func doUpload(path, title, privacy, language string, noWait bool) {
 
 	fmt.Println("==> uploading", path, "as", privacy)
 	result, err := ytupload.Upload(path, ytupload.Options{
-		AccessToken: accessToken,
-		Title:       title,
-		Description: "vidpolish",
-		Tags:        []string{"vidpolish"},
-		Privacy:     privacy,
-		Language:    language,
-		NoWait:      noWait,
+		AccessToken:   accessToken,
+		Title:         title,
+		Description:   description,
+		Tags:          tags,
+		Privacy:       privacy,
+		Language:      language,
+		ThumbnailPath: thumbnailPath,
+		NoWait:        f.NoWait,
 		Progress: func(fraction float64, eta time.Duration) {
 			fmt.Printf("\ruploading: %.0f%% (ETA %s)   ", fraction*100, formatETA(eta))
 		},
@@ -209,9 +265,54 @@ func doUpload(path, title, privacy, language string, noWait bool) {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
-	if !noWait {
+	if !f.NoWait {
 		fmt.Println("==> done, video is fully processed:", result.URL)
 	}
+}
+
+// buildTags merges configured default tags with the fixed "vidpolish"
+// tag, deduplicating while preserving order (fixed tag first).
+func buildTags(defaultTags []string) []string {
+	tags := []string{"vidpolish"}
+	seen := map[string]bool{"vidpolish": true}
+	for _, t := range defaultTags {
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		tags = append(tags, t)
+	}
+	return tags
+}
+
+// buildDescription renders tmplText with {{.Title}}, ensuring the literal
+// word "vidpolish" always appears even if the template omits it.
+func buildDescription(tmplText, title string) string {
+	rendered := renderDescriptionTemplate(tmplText, title)
+	if !strings.Contains(rendered, "vidpolish") {
+		if rendered != "" {
+			rendered += "\n\n"
+		}
+		rendered += "vidpolish"
+	}
+	return rendered
+}
+
+func renderDescriptionTemplate(tmplText, title string) string {
+	if tmplText == "" {
+		return ""
+	}
+	tmpl, err := template.New("description").Parse(tmplText)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "warning: invalid description_template, falling back to plain title:", err)
+		return title
+	}
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, struct{ Title string }{title}); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: rendering description_template failed, falling back to plain title:", err)
+		return title
+	}
+	return buf.String()
 }
 
 func formatETA(d time.Duration) string {
@@ -247,6 +348,7 @@ func reorderFlags(args []string) []string {
 		"-no-cache": true, "--no-cache": true,
 		"-upload": true, "--upload": true,
 		"-no-wait": true, "--no-wait": true,
+		"-no-thumbnail": true, "--no-thumbnail": true,
 	}
 	valueFlags := map[string]bool{
 		"-output-dir": true, "--output-dir": true,
@@ -255,6 +357,7 @@ func reorderFlags(args []string) []string {
 		"-title": true, "--title": true,
 		"-privacy": true, "--privacy": true,
 		"-language": true, "--language": true,
+		"-thumbnail": true, "--thumbnail": true,
 	}
 
 	var flags, positional []string
@@ -279,12 +382,17 @@ func reorderFlags(args []string) []string {
 }
 
 func runDeps() {
-	for _, tool := range []binmgr.Tool{binmgr.FFmpeg, binmgr.FFprobe, binmgr.DeepFilter, binmgr.AutoEditor} {
+	for _, tool := range []binmgr.Tool{binmgr.FFmpeg, binmgr.FFprobe, binmgr.DeepFilter, binmgr.AutoEditor, binmgr.Resvg} {
 		path, err := binmgr.Resolve(tool)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%-12s ERROR: %v\n", tool, err)
 			continue
 		}
 		fmt.Printf("%-12s %s\n", tool, path)
+	}
+	if regular, bold, err := binmgr.ResolveFont(); err != nil {
+		fmt.Fprintf(os.Stderr, "%-12s ERROR: %v\n", "font", err)
+	} else {
+		fmt.Printf("%-12s %s, %s\n", "font", regular, bold)
 	}
 }
