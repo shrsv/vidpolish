@@ -120,7 +120,8 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	meta, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("no config at %s, run \"vidpolish config init\" first", path)
 		}
@@ -134,6 +135,13 @@ func Load() (*Config, error) {
 	}
 	if cfg.YouTube.DescriptionTemplate == "" {
 		cfg.YouTube.DescriptionTemplate = "{{.Title}}\n\nvidpolish"
+	}
+	// Thumbnail generation defaults to on. A plain bool zero-value can't
+	// tell "the config never mentioned [thumbnail].enabled" apart from
+	// "explicitly set to false", so check the decode metadata: only a
+	// config that actually spells out `enabled = false` turns it off.
+	if !meta.IsDefined("thumbnail", "enabled") {
+		cfg.Thumbnail.Enabled = true
 	}
 	if cfg.Thumbnail.BackgroundColor == "" {
 		cfg.Thumbnail.BackgroundColor = "#0f172a"

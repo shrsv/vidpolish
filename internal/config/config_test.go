@@ -82,6 +82,29 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.Thumbnail.TextColor != "#ffffff" {
 		t.Fatalf("TextColor default = %q", cfg.Thumbnail.TextColor)
 	}
+	if !cfg.Thumbnail.Enabled {
+		t.Fatal("Thumbnail.Enabled should default to true when [thumbnail] is absent from the config entirely (e.g. an older config predating this feature)")
+	}
+}
+
+func TestLoadRespectsExplicitThumbnailDisabled(t *testing.T) {
+	withTempHome(t)
+	path, err := Init()
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	content := "[thumbnail]\nenabled = false\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing test config: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Thumbnail.Enabled {
+		t.Fatal("Thumbnail.Enabled = true, want false (explicitly disabled in config)")
+	}
 }
 
 func TestLoadPreservesConfiguredTagsAndThumbnail(t *testing.T) {

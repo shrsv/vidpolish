@@ -243,7 +243,7 @@ want from YouTube Studio afterward.
 | `--language` | from config (`en`) | BCP-47 language code, e.g. `en`, `en-IN`. |
 | `--no-wait` | off | Return right after the upload finishes instead of also waiting on YouTube's processing status. |
 | `--thumbnail <path>` | none | Use a specific pre-made image as the thumbnail instead of auto-generating one. |
-| `--no-thumbnail` | off | Don't set a thumbnail for this upload, even if auto-generation is enabled in config. |
+| `--no-thumbnail` | off | Don't set a thumbnail for this upload; generation is on by default otherwise. |
 
 ### Default tags and description
 
@@ -263,18 +263,28 @@ automatically so that tag is always present even if you edit the template.
 
 ### Auto-generated thumbnails
 
-vidpolish can generate a 1280x720 thumbnail for every upload: a brand
-background, your logo in a corner, and the video title laid out with a
-title-fitting pass that shrinks the font and wraps across up to three
-lines for longer titles, truncating with an ellipsis only as a last
-resort. It's built as an SVG (so it stays human-inspectable/tweakable) and
-rasterized with [resvg](https://github.com/linebender/resvg).
+**Enabled by default.** Every `upload`/`process --upload` generates a
+1280x720 thumbnail and sets it on the video automatically: a brand
+background, your logo in a corner (if you configure one), and the video
+title laid out with a title-fitting pass that shrinks the font and wraps
+across up to three lines for longer titles, truncating with an ellipsis
+only as a last resort. You don't need to turn anything on for this; it
+just happens as part of `upload`. It's built as an SVG (so it stays
+human-inspectable/tweakable) and rasterized with
+[resvg](https://github.com/linebender/resvg).
+
+Skip it for a single run with `--no-thumbnail`, or use your own
+pre-made image with `--thumbnail <path>` instead of generating one.
+To turn it off entirely, set `enabled = false` under `[thumbnail]` in
+`~/.vidpolish/config.toml`; leaving `[thumbnail]` out of the config
+entirely (or `vidpolish config init`'s freshly generated file) means it
+stays on, since on is the default either way.
 
 Configure it under `[thumbnail]` in `~/.vidpolish/config.toml`:
 
 ```toml
 [thumbnail]
-enabled           = true
+enabled           = true   # generation is on by default even without this line
 logo_path         = "/path/to/your/logo.svg"   # PNG/JPG also accepted; empty = no logo
 background_color  = "#0f172a"
 accent_color      = "#22d3ee"
@@ -282,11 +292,9 @@ text_color        = "#ffffff"
 ```
 
 `logo_path` is entirely up to you; an SVG logo is rasterized automatically
-(and cached) the first time it's used. With `[thumbnail].enabled = true`,
-every `upload`/`process --upload` generates and sets a thumbnail unless
-you pass `--thumbnail <path>` (use your own image) or `--no-thumbnail`
-(skip it for this run). The generated PNG is saved next to the uploaded
-video as `<name>-thumbnail.png`, along with its source `.svg`.
+(and cached) the first time it's used. The generated PNG is saved next to
+the uploaded video as `<name>-thumbnail.png`, along with its source `.svg`,
+so you can see exactly what got set and hand-edit the SVG if you want.
 
 **Custom thumbnails require phone verification on your channel.** This is
 a real YouTube API requirement, not a vidpolish limitation: if your
