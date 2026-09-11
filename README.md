@@ -156,25 +156,124 @@ binaries themselves.
 writes to a separate cache/output path; nothing in the pipeline writes back
 to the file you pass to `process`.
 
+## YouTube upload
+
+vidpolish can upload the polished result straight to YouTube, defaulting
+to an unlisted video with progress and an ETA printed while it uploads.
+
+### One-time setup in Google Cloud Console
+
+Uploading is a write operation on your channel, so it needs OAuth 2.0
+consent, not just an API key:
+
+1. Create (or pick) a project at [console.cloud.google.com](https://console.cloud.google.com/),
+   then enable the **YouTube Data API v3** under APIs & Services.
+2. Under APIs & Services > Credentials, create an **OAuth client ID** of
+   type **Desktop app**. Note the client ID and client secret.
+3. If your project's OAuth consent screen is still in testing mode, add
+   your own Google account as a test user so login doesn't get rejected.
+
+### Configure and log in
+
+```sh
+./vidpolish config init
+```
+
+Creates `~/.vidpolish/config.toml`. Open it and fill in `client_id` and
+`client_secret` from step 2 above, and adjust `privacy`/`default_language`
+if you want different defaults. Then:
+
+```sh
+./vidpolish youtube login
+```
+
+Opens a browser for a one-time consent screen and stores a refresh token
+back into the config file. You do not need to repeat this on future
+uploads, only if you revoke access or move to a new machine.
+
+If your Google Cloud project's OAuth consent screen is in testing mode,
+add your own account under Test users first or the consent step will be
+rejected.
+
+On a headless machine or inside WSL, `vidpolish youtube login` cannot open
+a browser for you; it prints the authorization URL instead so you can open
+it yourself (on Windows, if you're in WSL). It listens on a local port for
+up to 5 minutes waiting for you to approve it.
+
+### Uploading
+
+```sh
+./vidpolish upload path/to/polished.mp4
+./vidpolish upload path/to/polished.mp4 --title "Walkthrough" --privacy public --language en-IN
+```
+
+Or do the whole thing in one command, polish then upload:
+
+```sh
+./vidpolish process path/to/recording.mp4 --upload --speed 1.25 --privacy unlisted
+```
+
+Every upload prints progress and an ETA as it goes, then the video link
+**as soon as it's known**, right after the upload itself finishes:
+
+```
+==> uploading path/to/polished.mp4 as unlisted
+uploading: 100% (ETA ...)
+uploaded: https://youtu.be/dQw4w9WgXcQ
+==> processing status: processing
+==> done, video is fully processed: https://youtu.be/dQw4w9WgXcQ
+```
+
+The link is valid and shareable the moment it prints; you do not need to
+wait for the "fully processed" line. That part only continues to poll
+YouTube (for up to about two minutes) so you can see when it finishes
+transcoding. Skip that wait entirely with `--no-wait`, and the command
+returns right after the `uploaded:` line.
+
+The description and tags on uploaded videos just contain `vidpolish`; fill
+in anything else you want from YouTube Studio afterward.
+
+### `upload` / `process --upload` flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--title` | input filename | Video title. |
+| `--privacy` | from config (`unlisted`) | `public`, `unlisted`, or `private`. |
+| `--language` | from config (`en`) | BCP-47 language code, e.g. `en`, `en-IN`. |
+| `--no-wait` | off | Return right after the upload finishes instead of also waiting on YouTube's processing status. |
+
+### About automatic captions
+
+There is no API call that generates subtitles on demand. YouTube's
+automatic captions are produced by YouTube's own backend once it finishes
+processing the audio track. What vidpolish does control is
+`defaultLanguage`/`defaultAudioLanguage` on the uploaded video (via
+`--language` or the config default), which tells YouTube which language
+model to use for auto-generated captions. Setting it correctly improves
+caption accuracy and availability, but does not force captions to appear
+on any particular schedule.
+
 ## Project layout
 
 ```
-cmd/vidpolish       CLI entrypoint (flag parsing, wiring)
-internal/binmgr      resolves/downloads deep-filter and auto-editor
-internal/cache       the ~/.vidpolish/cache artifact cache
-internal/pipeline    the split / denoise / remux / auto-edit stages
-media/               logo assets
+cmd/vidpolish        CLI entrypoint (flag parsing, wiring)
+internal/binmgr       resolves/downloads deep-filter and auto-editor
+internal/cache        the ~/.vidpolish/cache artifact cache
+internal/config       ~/.vidpolish/config.toml load/init/save
+internal/pipeline     the split / denoise / remux / auto-edit stages
+internal/ytauth       YouTube OAuth 2.0 installed-app login flow
+internal/ytupload     resumable YouTube upload with progress/ETA
+media/                logo assets
 ```
 
 ## Status and roadmap
 
-vidpolish currently covers the local processing pipeline: split, denoise,
-cut, and optional speed changes, with caching to make iterating fast.
+vidpolish covers the local processing pipeline (split, denoise, cut,
+optional speed changes, with caching) and uploading the result to YouTube
+as unlisted-by-default with progress, ETA, and language metadata.
 
 Planned next:
 
-- YouTube upload and metadata automation (title, description, default
-  language such as Indian English).
 - A UI on top of the same library/CLI.
 
 ## Development
