@@ -1,0 +1,7 @@
+/dist/
+/output/
+/testdata/
+*.mp4
+*.wav
+*.mkv
+/vidpolish
