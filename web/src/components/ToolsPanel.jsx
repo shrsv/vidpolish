@@ -28,7 +28,7 @@ export function ToolsPanel() {
         </button>
       </div>
       {tools.map((t) => (
-        <div key={t.name} class="card p-3 space-y-1">
+        <div key={t.name} class="card p-3 space-y-1 transition-colors hover:border-slate-700">
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-2 min-w-0 shrink-0">
               {t.error ? <XCircle size={16} class="text-red-400 shrink-0" /> : <CheckCircle2 size={16} class="text-emerald-400 shrink-0" />}

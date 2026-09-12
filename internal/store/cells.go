@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -224,6 +225,67 @@ func (db *DB) UpdateCellParams(id, paramsJSON string) error {
 		return fmt.Errorf("updating cell params: %w", err)
 	}
 	return checkAffected(res, "cell", id)
+}
+
+// ReorderCells reassigns the display position of exactly the cells in
+// orderedIDs (which must all belong to projectID and be of kind) to
+// match that order. It reuses the same set of position values those
+// cells already occupy (rather than renumbering the whole project), so
+// cells of other kinds interleaved in the position sequence are
+// undisturbed. seq numbers are never touched. The whole operation is one
+// transaction: a partial failure leaves positions as they were.
+func (db *DB) ReorderCells(projectID, kind string, orderedIDs []string) error {
+	if len(orderedIDs) == 0 {
+		return nil
+	}
+
+	tx, err := db.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	placeholders := make([]string, len(orderedIDs))
+	args := make([]any, len(orderedIDs))
+	for i, id := range orderedIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	rows, err := tx.Query(
+		`SELECT id, position FROM cells WHERE project_id = ? AND kind = ? AND id IN (`+strings.Join(placeholders, ",")+`)`,
+		append([]any{projectID, kind}, args...)...,
+	)
+	if err != nil {
+		return fmt.Errorf("reordering cells: %w", err)
+	}
+	positionByID := make(map[string]int, len(orderedIDs))
+	var slots []int
+	for rows.Next() {
+		var id string
+		var pos int
+		if err := rows.Scan(&id, &pos); err != nil {
+			rows.Close()
+			return err
+		}
+		positionByID[id] = pos
+		slots = append(slots, pos)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+
+	if len(positionByID) != len(orderedIDs) {
+		return fmt.Errorf("reordering cells: one or more ids are not %s cells in project %s", kind, projectID)
+	}
+	sort.Ints(slots)
+
+	for i, id := range orderedIDs {
+		if _, err := tx.Exec(`UPDATE cells SET position = ?, updated_at = ? WHERE id = ?`, slots[i], time.Now().Unix(), id); err != nil {
+			return fmt.Errorf("reordering cells: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 // DeleteCell removes a cell. Callers should refuse to delete a project's

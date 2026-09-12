@@ -176,3 +176,168 @@ func TestSaveRoundTrips(t *testing.T) {
 		t.Fatalf("RefreshToken = %q, want refresh-xyz", reloaded.YouTube.RefreshToken)
 	}
 }
+
+func TestValidateRejectsBadValues(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+	}{
+		{"bad privacy", Config{YouTube: YouTube{Privacy: "sorta-public"}}},
+		{"bad background color", Config{Thumbnail: Thumbnail{BackgroundColor: "navy"}}},
+		{"bad accent color", Config{Thumbnail: Thumbnail{AccentColor: "#ggg"}}},
+		{"broken template", Config{YouTube: YouTube{DescriptionTemplate: "{{.Title"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if err := Validate(&c.cfg); err == nil {
+				t.Fatalf("expected Validate to reject %+v", c.cfg)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsGoodValues(t *testing.T) {
+	cfg := Config{
+		YouTube:   YouTube{Privacy: "public", DescriptionTemplate: "{{.Title}}"},
+		Thumbnail: Thumbnail{BackgroundColor: "#0f172a", AccentColor: "#fff", TextColor: ""},
+	}
+	if err := Validate(&cfg); err != nil {
+		t.Fatalf("Validate rejected a valid config: %v", err)
+	}
+}
+
+func TestSaveRejectsInvalidConfigWithoutTouchingDisk(t *testing.T) {
+	withTempHome(t)
+	if _, err := Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	before, err := os.ReadFile(mustPath(t))
+	if err != nil {
+		t.Fatalf("reading config: %v", err)
+	}
+
+	bad := &Config{YouTube: YouTube{Privacy: "nonsense"}}
+	if err := Save(bad); err == nil {
+		t.Fatal("expected Save to reject an invalid config")
+	}
+
+	after, err := os.ReadFile(mustPath(t))
+	if err != nil {
+		t.Fatalf("reading config: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("Save must not modify the on-disk config when validation fails")
+	}
+}
+
+func TestSaveIsAtomicNoPartialTempFileLeftBehind(t *testing.T) {
+	withTempHome(t)
+	if _, err := Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	dir := filepath.Dir(mustPath(t))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".tmp" {
+			t.Fatalf("leftover temp file after Save: %s", e.Name())
+		}
+	}
+}
+
+func TestSaveCreatesAndPrunesBackups(t *testing.T) {
+	withTempHome(t)
+	if _, err := Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Save more than maxBackups times; each Save backs up whatever was
+	// on disk *before* that save, so this produces maxBackups+1 saves
+	// worth of prior state to back up.
+	for i := 0; i < maxBackups+3; i++ {
+		cfg.YouTube.ClientID = "client-" + string(rune('a'+i))
+		if err := Save(cfg); err != nil {
+			t.Fatalf("Save #%d: %v", i, err)
+		}
+	}
+
+	backups, err := ListBackups()
+	if err != nil {
+		t.Fatalf("ListBackups: %v", err)
+	}
+	if len(backups) != maxBackups {
+		t.Fatalf("len(backups) = %d, want %d (old backups should be pruned)", len(backups), maxBackups)
+	}
+	// Most recent first.
+	for i := 1; i < len(backups); i++ {
+		if backups[i-1].Timestamp < backups[i].Timestamp {
+			t.Fatalf("backups not sorted most-recent-first: %+v", backups)
+		}
+	}
+}
+
+func TestRestoreBackupRoundTrips(t *testing.T) {
+	withTempHome(t)
+	if _, err := Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg.YouTube.ClientID = "original-client-id"
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	backups, err := ListBackups()
+	if err != nil || len(backups) == 0 {
+		t.Fatalf("ListBackups: %v, %v", backups, err)
+	}
+	// The most recent backup holds the config.toml template state (from
+	// Init), since that's what was on disk right before the Save above.
+	target := backups[0]
+
+	cfg.YouTube.ClientID = "changed-after-backup"
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	reloaded, _ := Load()
+	if reloaded.YouTube.ClientID != "changed-after-backup" {
+		t.Fatalf("sanity check failed: %q", reloaded.YouTube.ClientID)
+	}
+
+	if err := RestoreBackup(target.Timestamp); err != nil {
+		t.Fatalf("RestoreBackup: %v", err)
+	}
+	restored, err := Load()
+	if err != nil {
+		t.Fatalf("Load after restore: %v", err)
+	}
+	if restored.YouTube.ClientID != "" {
+		t.Fatalf("restored ClientID = %q, want empty (the pre-Save template state)", restored.YouTube.ClientID)
+	}
+}
+
+func mustPath(t *testing.T) string {
+	t.Helper()
+	p, err := Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	return p
+}

@@ -7,12 +7,44 @@ import (
 	"path/filepath"
 
 	"vidpolish/internal/cache"
+	"vidpolish/internal/store"
 )
 
 type cacheEntryResponse struct {
 	Fingerprint string `json:"fingerprint"`
 	SizeBytes   int64  `json:"sizeBytes"`
 	CachedAt    int64  `json:"cachedAt,omitempty"`
+	ProjectID   string `json:"projectId,omitempty"`
+	ProjectName string `json:"projectName,omitempty"`
+}
+
+// fingerprintToProject best-effort maps each cache fingerprint to the
+// project whose source video produced it, by recomputing the same
+// fingerprint pipeline.Process uses for every project's source cell. A
+// cache entry with no match just means its source video isn't tracked by
+// any current project (e.g. it was deleted, predates this project, or
+// came from a bare CLI run).
+func (s *Server) fingerprintToProject() map[string]*store.Project {
+	out := make(map[string]*store.Project)
+	projects, err := s.db.ListProjects()
+	if err != nil {
+		return out
+	}
+	for _, p := range projects {
+		cells, err := s.db.ListCellsByProject(p.ID)
+		if err != nil {
+			continue
+		}
+		for _, c := range cells {
+			if c.Kind != store.KindSource || c.OutputPath == nil || *c.OutputPath == "" {
+				continue
+			}
+			if fp, err := cache.Fingerprint(*c.OutputPath); err == nil {
+				out[fp] = p
+			}
+		}
+	}
+	return out
 }
 
 func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request) {
@@ -26,11 +58,17 @@ func (s *Server) handleListCache(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	byFingerprint := s.fingerprintToProject()
+
 	out := make([]cacheEntryResponse, 0, len(entries))
 	for _, e := range entries {
 		r := cacheEntryResponse{Fingerprint: e.Fingerprint, SizeBytes: e.SizeBytes}
 		if !e.CachedAt.IsZero() {
 			r.CachedAt = e.CachedAt.Unix()
+		}
+		if p, ok := byFingerprint[e.Fingerprint]; ok {
+			r.ProjectID = p.ID
+			r.ProjectName = p.Name
 		}
 		out = append(out, r)
 	}

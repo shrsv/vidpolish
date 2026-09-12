@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"vidpolish/internal/cache"
 	"vidpolish/internal/store"
 )
 
@@ -291,5 +293,207 @@ func TestJobTrackerPreventsDoubleStart(t *testing.T) {
 	j.finish("c1")
 	if !j.start("c1") {
 		t.Fatal("start after finish should succeed again")
+	}
+}
+
+func TestReorderCellsViaAPI(t *testing.T) {
+	_, ts := newTestServer(t)
+	_, proj := doJSON(t, http.MethodPost, ts.URL+"/api/projects", map[string]string{"name": "P"})
+	projectID := proj["id"].(string)
+	sourceID := proj["cells"].([]any)[0].(map[string]any)["id"].(string)
+
+	var editIDs []string
+	for range 2 {
+		_, c := doJSON(t, http.MethodPost, ts.URL+"/api/projects/"+projectID+"/cells", map[string]any{
+			"kind": "edit", "parentCellId": sourceID, "params": map[string]any{},
+		})
+		editIDs = append(editIDs, c["id"].(string))
+	}
+	reversed := []string{editIDs[1], editIDs[0]}
+
+	resp, body := doJSON(t, http.MethodPost, ts.URL+"/api/projects/"+projectID+"/reorder", map[string]any{
+		"kind": "edit", "orderedCellIds": reversed,
+	})
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("reorder status = %d, body = %v", resp.StatusCode, body)
+	}
+
+	_, refreshed := doJSON(t, http.MethodGet, ts.URL+"/api/projects/"+projectID, nil)
+	var gotOrder []string
+	for _, c := range refreshed["cells"].([]any) {
+		cell := c.(map[string]any)
+		if cell["kind"] == "edit" {
+			gotOrder = append(gotOrder, cell["id"].(string))
+		}
+	}
+	if len(gotOrder) != 2 || gotOrder[0] != reversed[0] || gotOrder[1] != reversed[1] {
+		t.Fatalf("edit cell order = %v, want %v", gotOrder, reversed)
+	}
+}
+
+func TestCacheListShowsOwningProject(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_, ts := newTestServer(t)
+
+	_, proj := doJSON(t, http.MethodPost, ts.URL+"/api/projects", map[string]string{"name": "Linked Project"})
+	sourceID := proj["cells"].([]any)[0].(map[string]any)["id"].(string)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("video", "clip.mp4")
+	fw.Write([]byte("some video bytes"))
+	mw.Close()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/cells/"+sourceID+"/source", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	uploadResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("source upload: %v", err)
+	}
+	var sourceCell map[string]any
+	json.NewDecoder(uploadResp.Body).Decode(&sourceCell)
+	uploadResp.Body.Close()
+	sourcePath := sourceCell["sourceFilename"] // just to ensure decode worked
+	if sourcePath == nil {
+		t.Fatal("source upload did not return sourceFilename")
+	}
+
+	// Manually create a cache entry keyed by this exact source file's
+	// fingerprint, the way pipeline.Process would.
+	home, _ := os.UserHomeDir()
+	projectFile := filepath.Join(home, ".vidpolish", "projects", proj["id"].(string), "source.mp4")
+	fp, err := cache.Fingerprint(projectFile)
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	cacheDir := filepath.Join(home, ".vidpolish", "cache", fp)
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "video.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	resp, err := http.Get(ts.URL + "/api/cache")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	var entries []map[string]any
+	json.NewDecoder(resp.Body).Decode(&entries)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %v", entries)
+	}
+	if entries[0]["projectName"] != "Linked Project" {
+		t.Fatalf("projectName = %v, want 'Linked Project': %v", entries[0]["projectName"], entries[0])
+	}
+}
+
+func TestConfigBackupsListAndRestore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_, ts := newTestServer(t)
+
+	doJSON(t, http.MethodPut, ts.URL+"/api/config", map[string]any{
+		"youtube": map[string]any{"clientId": "first"},
+	})
+	doJSON(t, http.MethodPut, ts.URL+"/api/config", map[string]any{
+		"youtube": map[string]any{"clientId": "second"},
+	})
+
+	resp, err := http.Get(ts.URL + "/api/config/backups")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	var backups []map[string]any
+	json.NewDecoder(resp.Body).Decode(&backups)
+	if len(backups) == 0 {
+		t.Fatal("expected at least one backup after two saves")
+	}
+
+	ts0 := backups[len(backups)-1]["timestamp"].(string) // oldest = pre-first-save (empty client id)
+	restoreResp, restored := doJSON(t, http.MethodPost, ts.URL+"/api/config/backups/"+ts0+"/restore", map[string]any{})
+	if restoreResp.StatusCode != http.StatusOK {
+		t.Fatalf("restore status = %d, body = %v", restoreResp.StatusCode, restored)
+	}
+	yt := restored["youtube"].(map[string]any)
+	if yt["clientId"] != "" {
+		t.Fatalf("clientId after restoring oldest backup = %v, want empty", yt["clientId"])
+	}
+}
+
+func TestConfigPutRejectsInvalidPrivacy(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_, ts := newTestServer(t)
+
+	resp, body := doJSON(t, http.MethodPut, ts.URL+"/api/config", map[string]any{
+		"youtube": map[string]any{"privacy": "nonsense"},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %v, want 400", resp.StatusCode, body)
+	}
+}
+
+func TestCellThumbnailNotFoundBeforeGeneration(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_, ts := newTestServer(t)
+	_, proj := doJSON(t, http.MethodPost, ts.URL+"/api/projects", map[string]string{"name": "P"})
+	sourceID := proj["cells"].([]any)[0].(map[string]any)["id"].(string)
+
+	resp, err := http.Get(ts.URL + "/api/cells/" + sourceID + "/thumbnail")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 before any thumbnail exists", resp.StatusCode)
+	}
+}
+
+func TestCellThumbnailServesGeneratedFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	_, ts := newTestServer(t)
+	_, proj := doJSON(t, http.MethodPost, ts.URL+"/api/projects", map[string]string{"name": "P"})
+	projectID := proj["id"].(string)
+	sourceID := proj["cells"].([]any)[0].(map[string]any)["id"].(string)
+
+	_, editResp := doJSON(t, http.MethodPost, ts.URL+"/api/projects/"+projectID+"/cells", map[string]any{
+		"kind": "edit", "parentCellId": sourceID, "params": map[string]any{},
+	})
+	editID := editResp["id"].(string)
+	_, uploadResp := doJSON(t, http.MethodPost, ts.URL+"/api/projects/"+projectID+"/cells", map[string]any{
+		"kind": "upload", "parentCellId": editID, "params": map[string]any{},
+	})
+	uploadID := uploadResp["id"].(string)
+
+	home, _ := os.UserHomeDir()
+	thumbDir := filepath.Join(home, ".vidpolish", "projects", projectID, "cells", uploadID)
+	if err := os.MkdirAll(thumbDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(thumbDir, "thumbnail.png"), []byte("fake png bytes"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// GET /api/projects/{id} should now advertise a thumbnailUrl for this cell.
+	_, refreshed := doJSON(t, http.MethodGet, ts.URL+"/api/projects/"+projectID, nil)
+	var thumbURL string
+	for _, c := range refreshed["cells"].([]any) {
+		cell := c.(map[string]any)
+		if cell["id"] == uploadID {
+			thumbURL, _ = cell["thumbnailUrl"].(string)
+		}
+	}
+	if thumbURL == "" {
+		t.Fatal("expected thumbnailUrl once the thumbnail file exists")
+	}
+
+	resp, err := http.Get(ts.URL + thumbURL)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(data) != "fake png bytes" {
+		t.Fatalf("status=%d body=%q", resp.StatusCode, data)
 	}
 }

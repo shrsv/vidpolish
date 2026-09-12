@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'preact/hooks';
-import { Plus, ChevronRight, Trash2 } from 'lucide-preact';
+import { Plus, ChevronRight, Trash2, Database } from 'lucide-preact';
 import { api } from '../api.js';
+import { navigate, paths } from '../router.js';
 
-export function ProjectList({ onOpen }) {
+export function ProjectList() {
   const [projects, setProjects] = useState([]);
   const [name, setName] = useState('');
   const [error, setError] = useState('');
@@ -16,14 +17,14 @@ export function ProjectList({ onOpen }) {
     try {
       const p = await api.createProject(name.trim());
       setName('');
-      await refresh();
-      onOpen(p.id);
+      navigate(paths.project(p.id));
     } catch (e) {
       setError(e.message);
     }
   };
 
-  const remove = async (id) => {
+  const remove = async (e, id) => {
+    e.stopPropagation();
     if (!confirm('Delete this project and all its cells?')) return;
     await api.deleteProject(id);
     refresh();
@@ -48,22 +49,44 @@ export function ProjectList({ onOpen }) {
         {projects.length === 0 && (
           <p class="text-sm text-slate-500">No projects yet. Create one above to drop in a video.</p>
         )}
-        {projects.map((p) => (
-          <div key={p.id} class="card flex items-center justify-between px-4 py-3">
-            <button class="flex-1 text-left" onClick={() => onOpen(p.id)}>
-              <div class="font-medium">{p.name}</div>
-              <div class="text-xs text-slate-500">{p.cells.length} cell{p.cells.length === 1 ? '' : 's'}</div>
-            </button>
-            <div class="flex items-center gap-2">
-              <button class="btn-secondary" onClick={() => onOpen(p.id)}>
-                Open <ChevronRight size={15} />
-              </button>
-              <button class="btn-danger" onClick={() => remove(p.id)}>
-                <Trash2 size={15} />
-              </button>
+        {projects.map((p) => {
+          const hasSource = p.cells.some((c) => c.kind === 'source' && c.mediaUrl);
+          return (
+            <div
+              key={p.id}
+              role="button"
+              tabIndex={0}
+              class="card group flex items-center justify-between px-4 py-3 cursor-pointer transition-colors hover:bg-slate-800/40 hover:border-slate-700"
+              onClick={() => navigate(paths.project(p.id))}
+              onKeyDown={(e) => e.key === 'Enter' && navigate(paths.project(p.id))}
+            >
+              <div>
+                <div class="font-medium">{p.name}</div>
+                <div class="text-xs text-slate-500">
+                  {p.cells.length} cell{p.cells.length === 1 ? '' : 's'}
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                {hasSource && (
+                  <button
+                    class="text-xs text-slate-500 hover:text-cyan-400 flex items-center gap-1 transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(paths.cache());
+                    }}
+                    title="View cache usage"
+                  >
+                    <Database size={13} /> Cache
+                  </button>
+                )}
+                <button class="btn-danger" onClick={(e) => remove(e, p.id)} title="Delete project">
+                  <Trash2 size={15} />
+                </button>
+                <ChevronRight size={18} class="text-slate-600 group-hover:text-slate-300 transition-colors" />
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

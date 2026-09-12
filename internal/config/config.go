@@ -4,8 +4,15 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"text/template"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -43,7 +50,7 @@ type Config struct {
 	Thumbnail Thumbnail `toml:"thumbnail"`
 }
 
-const template = `[youtube]
+const configTemplate = `[youtube]
 # From a Google Cloud Console OAuth client of type "Desktop app" with the
 # YouTube Data API v3 enabled. See the README's YouTube upload section.
 client_id     = ""
@@ -105,7 +112,7 @@ func Init() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("creating config dir: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(template), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(configTemplate), 0o600); err != nil {
 		return "", fmt.Errorf("writing config: %w", err)
 	}
 	return path, nil
@@ -155,20 +162,198 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
-// Save writes cfg back to ~/.vidpolish/config.toml, e.g. after storing a
-// refresh token from "vidpolish youtube login".
+// maxBackups is how many timestamped backups BackupDir retains; older
+// ones are pruned on each Save.
+const maxBackups = 10
+
+var (
+	hexColorRe = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+	privacies  = map[string]bool{"public": true, "unlisted": true, "private": true}
+)
+
+// Validate rejects a Config that would be unsafe or broken to save:
+// an unrecognized privacy value, a thumbnail color that isn't a valid
+// #rgb/#rrggbb hex code, or a description_template that fails to parse.
+// The CLI and the local UI's config API both call this before Save so
+// neither path can persist a config that quietly breaks uploads.
+func Validate(cfg *Config) error {
+	if cfg.YouTube.Privacy != "" && !privacies[cfg.YouTube.Privacy] {
+		return fmt.Errorf("youtube.privacy must be public, unlisted, or private, got %q", cfg.YouTube.Privacy)
+	}
+	for name, v := range map[string]string{
+		"background_color": cfg.Thumbnail.BackgroundColor,
+		"accent_color":     cfg.Thumbnail.AccentColor,
+		"text_color":       cfg.Thumbnail.TextColor,
+	} {
+		if v != "" && !hexColorRe.MatchString(v) {
+			return fmt.Errorf("thumbnail.%s must be a #rgb or #rrggbb hex color, got %q", name, v)
+		}
+	}
+	if cfg.YouTube.DescriptionTemplate != "" {
+		if _, err := template.New("description").Parse(cfg.YouTube.DescriptionTemplate); err != nil {
+			return fmt.Errorf("youtube.description_template is not a valid template: %w", err)
+		}
+	}
+	return nil
+}
+
+// BackupDir returns ~/.vidpolish/config-backups, creating it if needed.
+func BackupDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolving home directory: %w", err)
+	}
+	dir := filepath.Join(home, ".vidpolish", "config-backups")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating config backup dir: %w", err)
+	}
+	return dir, nil
+}
+
+// Backup is one saved snapshot of a prior config.toml.
+type Backup struct {
+	Timestamp int64 // unix nanoseconds; a unique, sortable id used by ListBackups/RestoreBackup
+	Path      string
+}
+
+// ListBackups returns saved config backups, most recent first.
+func ListBackups() ([]Backup, error) {
+	dir, err := BackupDir()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("listing config backups: %w", err)
+	}
+	var out []Backup
+	for _, e := range entries {
+		ts, ok := parseBackupFilename(e.Name())
+		if !ok {
+			continue
+		}
+		out = append(out, Backup{Timestamp: ts, Path: filepath.Join(dir, e.Name())})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp > out[j].Timestamp })
+	return out, nil
+}
+
+// RestoreBackup writes the backup taken at timestamp back to
+// ~/.vidpolish/config.toml (itself going through Save's atomic-write and
+// fresh-backup path, so a restore can always be undone too).
+func RestoreBackup(timestamp int64) error {
+	dir, err := BackupDir()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(dir, backupFilename(timestamp)))
+	if err != nil {
+		return fmt.Errorf("reading backup: %w", err)
+	}
+	var cfg Config
+	if _, err := toml.Decode(string(data), &cfg); err != nil {
+		return fmt.Errorf("parsing backup: %w", err)
+	}
+	return Save(&cfg)
+}
+
+func backupFilename(ts int64) string {
+	return "config-" + strconv.FormatInt(ts, 10) + ".toml"
+}
+
+func parseBackupFilename(name string) (int64, bool) {
+	if !strings.HasPrefix(name, "config-") || !strings.HasSuffix(name, ".toml") {
+		return 0, false
+	}
+	ts, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(name, "config-"), ".toml"), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return ts, true
+}
+
+// Save validates cfg, then writes it back to ~/.vidpolish/config.toml
+// atomically (write to a temp file, then rename over the real path, so a
+// crash mid-write can never leave a half-written config), backing up
+// whatever was there before under ~/.vidpolish/config-backups first.
 func Save(cfg *Config) error {
+	if err := Validate(cfg); err != nil {
+		return err
+	}
 	path, err := Path()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+
+	if err := backupCurrent(path); err != nil {
+		return fmt.Errorf("backing up config before save: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(dir, "config-*.toml.tmp")
 	if err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
-	defer f.Close()
-	return toml.NewEncoder(f).Encode(cfg)
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once renamed away
+
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing config: %w", err)
+	}
+	if err := toml.NewEncoder(tmp).Encode(cfg); err != nil {
+		tmp.Close()
+		return fmt.Errorf("encoding config: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
+}
+
+// backupCurrent copies whatever is currently on disk at path into
+// ~/.vidpolish/config-backups before it gets overwritten, then prunes
+// old backups beyond maxBackups. A missing current file is not an error
+// (nothing to back up yet).
+func backupCurrent(path string) error {
+	src, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer src.Close()
+
+	dir, err := BackupDir()
+	if err != nil {
+		return err
+	}
+	dest, err := os.OpenFile(filepath.Join(dir, backupFilename(time.Now().UnixNano())), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer dest.Close()
+	if _, err := io.Copy(dest, src); err != nil {
+		return err
+	}
+
+	backups, err := ListBackups()
+	if err != nil {
+		return err
+	}
+	for _, b := range backups[min(len(backups), maxBackups):] {
+		os.Remove(b.Path)
+	}
+	return nil
 }

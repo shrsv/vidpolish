@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"vidpolish/internal/config"
 	"vidpolish/internal/ytauth"
@@ -156,7 +157,51 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := config.Validate(cfg); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := config.Save(cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toConfigResponse(cfg))
+}
+
+// handleListConfigBackups returns recent config.toml snapshots, most
+// recent first, taken automatically on every save.
+func (s *Server) handleListConfigBackups(w http.ResponseWriter, r *http.Request) {
+	backups, err := config.ListBackups()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	// timestamp is serialized as a string: it's a Unix-nanosecond int64,
+	// and JSON numbers are commonly decoded as float64 by clients (Go's
+	// encoding/json into `any`, and JavaScript's Number type), which
+	// cannot represent 19-digit integers exactly.
+	out := make([]map[string]any, 0, len(backups))
+	for _, b := range backups {
+		out = append(out, map[string]any{"timestamp": strconv.FormatInt(b.Timestamp, 10)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleRestoreConfigBackup restores config.toml from a prior backup.
+// The restore itself goes through Save's atomic-write-plus-backup path,
+// so it can always be undone too.
+func (s *Server) handleRestoreConfigBackup(w http.ResponseWriter, r *http.Request) {
+	ts, err := strconv.ParseInt(r.PathValue("timestamp"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid timestamp"))
+		return
+	}
+	if err := config.RestoreBackup(ts); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

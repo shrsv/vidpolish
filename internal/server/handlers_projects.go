@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
 	"vidpolish/internal/store"
 )
@@ -26,6 +27,7 @@ type cellResponse struct {
 	Status         string `json:"status"`
 	StatusMessage  string `json:"statusMessage,omitempty"`
 	MediaURL       string `json:"mediaUrl,omitempty"`
+	ThumbnailURL   string `json:"thumbnailUrl,omitempty"`
 	SourceFilename string `json:"sourceFilename,omitempty"`
 	YouTubeURL     string `json:"youtubeUrl,omitempty"`
 	Position       int    `json:"position"`
@@ -48,6 +50,13 @@ func cellToResponse(c *store.Cell) *cellResponse {
 	}
 	if c.OutputPath != nil && *c.OutputPath != "" {
 		r.MediaURL = "/api/media/" + c.ID
+	}
+	if c.Kind == store.KindUpload {
+		if path, err := cellThumbnailPath(c); err == nil {
+			if _, err := os.Stat(path); err == nil {
+				r.ThumbnailURL = "/api/cells/" + c.ID + "/thumbnail"
+			}
+		}
 	}
 	if c.SourceFilename != nil {
 		r.SourceFilename = *c.SourceFilename
@@ -263,6 +272,30 @@ func (s *Server) handleDeleteCell(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.db.DeleteCell(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleReorderCells persists a new display order for all cells of one
+// kind within a project (edit cells among themselves, upload cells among
+// themselves). seq numbers are untouched.
+func (s *Server) handleReorderCells(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	var req struct {
+		Kind           string   `json:"kind"`
+		OrderedCellIDs []string `json:"orderedCellIds"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Kind != store.KindEdit && req.Kind != store.KindUpload {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("kind must be 'edit' or 'upload'"))
+		return
+	}
+	if err := s.db.ReorderCells(projectID, req.Kind, req.OrderedCellIDs); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

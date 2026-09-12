@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f2937"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="play" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="4" y="4" width="248" height="248" rx="56" fill="url(#bg)"/>
+  <rect x="4" y="4" width="248" height="248" rx="56" fill="none" stroke="#334155" stroke-width="2"/>
+
+  <!-- play triangle: the "vid" -->
+  <path d="M100 78 L182 128 L100 178 Z" fill="url(#play)"/>
+
+  <!-- polish sparkles: the "polish" -->
+  <g fill="url(#shine)">
+    <path d="M196 66
+             C198 78, 206 86, 218 88
+             C206 90, 198 98, 196 110
+             C194 98, 186 90, 174 88
+             C186 86, 194 78, 196 66 Z"/>
+    <path d="M60 168
+             C61 176, 67 182, 75 183
+             C67 184, 61 190, 60 198
+             C59 190, 53 184, 45 183
+             C53 182, 59 176, 60 168 Z"/>
+  </g>
+</svg>

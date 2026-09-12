@@ -1,15 +1,33 @@
-import { useEffect, useState } from 'preact/hooks';
-import { Save, LogIn, CheckCircle2 } from 'lucide-preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { Save, LogIn, CheckCircle2, History, RotateCcw } from 'lucide-preact';
 import { api } from '../api.js';
 
-export function ConfigPanel() {
+export function ConfigPanel({ section }) {
   const [cfg, setCfg] = useState(null);
   const [clientSecretInput, setClientSecretInput] = useState('');
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [loginStatus, setLoginStatus] = useState('');
+  const [backups, setBackups] = useState([]);
+  const [showBackups, setShowBackups] = useState(false);
+  const sectionRefs = useRef({});
 
   const refresh = () => api.getConfig().then(setCfg);
+  const refreshBackups = () => api.listConfigBackups().then(setBackups);
   useEffect(refresh, []);
+  useEffect(refreshBackups, []);
+
+  // Deep-link support: #/config/thumbnail etc. scrolls to and briefly
+  // highlights that settings section.
+  useEffect(() => {
+    if (!section || !cfg) return;
+    const el = sectionRefs.current[section];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.classList.add('ring-2', 'ring-cyan-500');
+    const t = setTimeout(() => el.classList.remove('ring-2', 'ring-cyan-500'), 1600);
+    return () => clearTimeout(t);
+  }, [section, cfg]);
 
   if (!cfg) return <p class="text-sm text-slate-500">Loading...</p>;
 
@@ -25,6 +43,7 @@ export function ConfigPanel() {
   };
 
   const save = async () => {
+    setSaveError('');
     const body = {
       youtube: {
         clientId: cfg.youtube.clientId,
@@ -36,11 +55,25 @@ export function ConfigPanel() {
       thumbnail: cfg.thumbnail,
     };
     if (clientSecretInput) body.youtube.clientSecret = clientSecretInput;
-    await api.putConfig(body);
+    try {
+      await api.putConfig(body);
+    } catch (e) {
+      // Validation rejected the save; the on-disk config is untouched.
+      setSaveError(e.message);
+      return;
+    }
     setClientSecretInput('');
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
     refresh();
+    refreshBackups();
+  };
+
+  const restore = async (timestamp) => {
+    if (!confirm('Restore config to this backup? Your current config will itself be backed up first.')) return;
+    await api.restoreConfigBackup(timestamp);
+    refresh();
+    refreshBackups();
   };
 
   const connectYouTube = async () => {
@@ -58,7 +91,7 @@ export function ConfigPanel() {
 
   return (
     <div class="space-y-6 max-w-2xl">
-      <section class="card p-4 space-y-3">
+      <section class="card p-4 space-y-3" ref={(el) => (sectionRefs.current.youtube = el)}>
         <h2 class="font-semibold">YouTube API credentials</h2>
         <div>
           <label class="label">Client ID</label>
@@ -91,7 +124,7 @@ export function ConfigPanel() {
         {loginStatus && <p class="text-xs text-cyan-400">{loginStatus}</p>}
       </section>
 
-      <section class="card p-4 space-y-3">
+      <section class="card p-4 space-y-3" ref={(el) => (sectionRefs.current['upload-defaults'] = el)}>
         <h2 class="font-semibold">Upload defaults</h2>
         <div class="flex gap-4">
           <div class="flex-1">
@@ -126,7 +159,7 @@ export function ConfigPanel() {
         </div>
       </section>
 
-      <section class="card p-4 space-y-3">
+      <section class="card p-4 space-y-3" ref={(el) => (sectionRefs.current.thumbnail = el)}>
         <div class="flex items-center justify-between">
           <h2 class="font-semibold">Thumbnails</h2>
           <label class="flex items-center gap-2 text-sm">
@@ -160,9 +193,39 @@ export function ConfigPanel() {
         </div>
       </section>
 
-      <button class="btn-primary" onClick={save}>
-        <Save size={15} /> {saved ? 'Saved' : 'Save config'}
-      </button>
+      {saveError && (
+        <p class="text-sm text-red-400">
+          Not saved: {saveError} — your existing config is untouched.
+        </p>
+      )}
+      <div class="flex items-center gap-3">
+        <button class="btn-primary" onClick={save}>
+          <Save size={15} /> {saved ? 'Saved' : 'Save config'}
+        </button>
+        <button class="btn-secondary" onClick={() => setShowBackups((v) => !v)}>
+          <History size={15} /> Backups ({backups.length})
+        </button>
+      </div>
+
+      {showBackups && (
+        <section class="card p-4 space-y-2">
+          <p class="text-xs text-slate-500">
+            A snapshot of config.toml is taken automatically before every save. Restoring itself
+            creates a new backup first, so nothing here is ever a one-way trip.
+          </p>
+          {backups.length === 0 && <p class="text-sm text-slate-500">No backups yet.</p>}
+          {backups.map((b) => (
+            <div key={b.timestamp} class="flex items-center justify-between text-sm">
+              <span class="text-slate-400 font-mono">
+                {new Date(Number(BigInt(b.timestamp) / 1000000n)).toLocaleString()}
+              </span>
+              <button class="btn-secondary" onClick={() => restore(b.timestamp)}>
+                <RotateCcw size={13} /> Restore
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

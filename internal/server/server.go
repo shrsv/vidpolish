@@ -47,6 +47,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/projects/{id}", s.handleGetProject)
 	s.mux.HandleFunc("DELETE /api/projects/{id}", s.handleDeleteProject)
 	s.mux.HandleFunc("POST /api/projects/{id}/cells", s.handleCreateCell)
+	s.mux.HandleFunc("POST /api/projects/{id}/reorder", s.handleReorderCells)
 
 	s.mux.HandleFunc("POST /api/cells/{id}/source", s.handleUploadSource)
 	s.mux.HandleFunc("PATCH /api/cells/{id}", s.handleUpdateCell)
@@ -56,9 +57,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/cells/{id}", s.handleDeleteCell)
 
 	s.mux.HandleFunc("GET /api/media/{id}", s.handleMedia)
+	s.mux.HandleFunc("GET /api/cells/{id}/thumbnail", s.handleCellThumbnail)
+	s.mux.HandleFunc("POST /api/thumbnail/preview", s.handleThumbnailPreview)
 
 	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	s.mux.HandleFunc("PUT /api/config", s.handlePutConfig)
+	s.mux.HandleFunc("GET /api/config/backups", s.handleListConfigBackups)
+	s.mux.HandleFunc("POST /api/config/backups/{timestamp}/restore", s.handleRestoreConfigBackup)
 	s.mux.HandleFunc("POST /api/youtube/login", s.handleYouTubeLogin)
 	s.mux.HandleFunc("GET /api/youtube/login/events", s.handleYouTubeLoginEvents)
 

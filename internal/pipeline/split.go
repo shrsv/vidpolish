@@ -1,24 +1,29 @@
 package pipeline
 
-import (
-	"fmt"
-	"os/exec"
-)
+import "fmt"
 
 // splitVideoAudio demuxes input into a video-only file (stream copy, no
 // re-encode) and a mono 48kHz PCM wav (DeepFilterNet's expected input
-// format).
-func splitVideoAudio(ffmpegPath, input, videoOut, audioOut string) error {
-	videoCmd := exec.Command(ffmpegPath, "-y", "-i", input,
-		"-map", "0:v", "-c", "copy", videoOut)
-	if out, err := videoCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg video split failed: %w\n%s", err, out)
+// format). report, if non-nil, receives real progress (0..1) parsed from
+// ffmpeg's own machine-readable output, split evenly between the two
+// passes (video split, then audio split).
+func splitVideoAudio(ffmpegPath, input, videoOut, audioOut string, duration float64, report func(local float64)) error {
+	videoArgs := []string{"-i", input, "-map", "0:v", "-c", "copy", videoOut}
+	if err := runFFmpegWithProgress(ffmpegPath, videoArgs, duration, func(local float64) {
+		if report != nil {
+			report(local * 0.5)
+		}
+	}); err != nil {
+		return fmt.Errorf("video split: %w", err)
 	}
 
-	audioCmd := exec.Command(ffmpegPath, "-y", "-i", input,
-		"-map", "0:a", "-vn", "-ac", "1", "-ar", "48000", audioOut)
-	if out, err := audioCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg audio split failed: %w\n%s", err, out)
+	audioArgs := []string{"-i", input, "-map", "0:a", "-vn", "-ac", "1", "-ar", "48000", audioOut}
+	if err := runFFmpegWithProgress(ffmpegPath, audioArgs, duration, func(local float64) {
+		if report != nil {
+			report(0.5 + local*0.5)
+		}
+	}); err != nil {
+		return fmt.Errorf("audio split: %w", err)
 	}
 
 	return nil

@@ -214,7 +214,7 @@ func (s *Server) runUploadCell(cell *store.Cell) error {
 		// no thumbnail
 	default: // "auto" or unset
 		if cfg.Thumbnail.Enabled {
-			dir, err := projectDir(cell.ProjectID)
+			out, err := cellThumbnailPath(cell)
 			if err != nil {
 				return err
 			}
@@ -224,11 +224,12 @@ func (s *Server) runUploadCell(cell *store.Cell) error {
 				BackgroundColor: cfg.Thumbnail.BackgroundColor,
 				AccentColor:     cfg.Thumbnail.AccentColor,
 				TextColor:       cfg.Thumbnail.TextColor,
-				OutPath:         filepath.Join(dir, "cells", cell.ID, "thumbnail.png"),
+				OutPath:         out,
 			})
 			if err != nil {
 				return fmt.Errorf("generating thumbnail: %w", err)
 			}
+			s.log(cell.ID)("==> generated thumbnail preview")
 		}
 	}
 

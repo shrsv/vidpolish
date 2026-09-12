@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"vidpolish/internal/binmgr"
 	"vidpolish/internal/cache"
@@ -43,9 +44,42 @@ func (o Options) logf(format string, args ...any) {
 	fmt.Println(msg)
 }
 
+// Stage weights: an approximate share of total wall-clock time each
+// stage typically takes, used to map each stage's own real (or
+// estimated, for denoise) local progress into one continuously-moving
+// overall percentage and a whole-job ETA. Denoising dominates (CPU-bound
+// neural net inference); splitting is a pure stream copy so it's fast;
+// remuxing re-encodes audio to AAC so it's not instant but still quick.
+// These weights are estimates, not measurements — good enough to place
+// stage boundaries, not a guarantee.
+var stageBounds = []struct {
+	start, end float64
+	label      string
+}{
+	{0.00, 0.08, "splitting video and audio"},
+	{0.08, 0.75, "denoising audio"},
+	{0.75, 0.82, "remuxing cleaned audio with video"},
+	{0.82, 1.00, "cutting silence with auto-editor"},
+}
+
+// newStageReporter builds a reporter for stage i (0-indexed into
+// stageBounds), or a no-op if opts has no Log sink wired up by the
+// caller in a way that needs live updates (it still falls back to
+// println via logf either way).
+func (o Options) newStageReporter(jobStart time.Time, i int) *stageReporter {
+	b := stageBounds[i]
+	return &stageReporter{
+		opts: o, jobStart: jobStart,
+		stepIndex: i + 1, stepTotal: len(stageBounds),
+		label:        b.label,
+		overallStart: b.start, overallEnd: b.end,
+	}
+}
+
 // Process runs the full split -> denoise -> auto-edit pipeline on
 // opts.Input and returns the path to the final output file.
 func Process(opts Options) (string, error) {
+	start := time.Now()
 	if opts.Margin == "" {
 		opts.Margin = "0.2s"
 	}
@@ -54,6 +88,10 @@ func Process(opts Options) (string, error) {
 	}
 
 	ffmpegPath, err := binmgr.Resolve(binmgr.FFmpeg)
+	if err != nil {
+		return "", err
+	}
+	ffprobePath, err := binmgr.Resolve(binmgr.FFprobe)
 	if err != nil {
 		return "", err
 	}
@@ -82,6 +120,13 @@ func Process(opts Options) (string, error) {
 	}
 	opts.logf("==> cache dir: %s", dir)
 
+	// Duration drives every stage's progress reporting: real fractional
+	// progress for ffmpeg passes (via its own -progress output), and an
+	// RTF-based estimate for deep-filter (which reports no progress of
+	// its own). Probed once, up front; if it fails for any reason,
+	// stages just fall back to "estimating..." rather than a percentage.
+	duration, _ := probeDuration(ffprobePath, opts.Input)
+
 	videoOnly := filepath.Join(dir, "video.mp4")
 	rawAudio := filepath.Join(dir, "audio.wav")
 	denoisedDir := filepath.Join(dir, "denoised")
@@ -97,8 +142,9 @@ func Process(opts Options) (string, error) {
 	// ready.
 	unlock := cache.Lock(fp)
 	if opts.NoCache || !exists(videoOnly) || !exists(rawAudio) {
-		opts.logf("==> splitting video and audio")
-		if err := splitVideoAudio(ffmpegPath, opts.Input, videoOnly, rawAudio); err != nil {
+		r := opts.newStageReporter(start, 0)
+		r.report(0)
+		if err := splitVideoAudio(ffmpegPath, opts.Input, videoOnly, rawAudio, duration, r.report); err != nil {
 			unlock()
 			return "", err
 		}
@@ -108,8 +154,9 @@ func Process(opts Options) (string, error) {
 
 	var denoisedAudio string
 	if opts.NoCache || !dirHasWav(denoisedDir) {
-		opts.logf("==> denoising audio")
-		denoisedAudio, err = denoise(deepFilterPath, rawAudio, denoisedDir)
+		r := opts.newStageReporter(start, 1)
+		r.report(0)
+		denoisedAudio, err = denoise(deepFilterPath, rawAudio, denoisedDir, duration, r.report)
 		if err != nil {
 			unlock()
 			return "", err
@@ -124,8 +171,9 @@ func Process(opts Options) (string, error) {
 	}
 
 	if opts.NoCache || !exists(remuxed) {
-		opts.logf("==> remuxing cleaned audio with video")
-		if err := muxVideoAudio(ffmpegPath, videoOnly, denoisedAudio, remuxed); err != nil {
+		r := opts.newStageReporter(start, 2)
+		r.report(0)
+		if err := muxVideoAudio(ffmpegPath, videoOnly, denoisedAudio, remuxed, duration, r.report); err != nil {
 			unlock()
 			return "", err
 		}
@@ -146,13 +194,15 @@ func Process(opts Options) (string, error) {
 	final := filepath.Join(dir, "final-"+paramsKey+".mp4")
 
 	if opts.NoCache || !exists(final) {
-		opts.logf("==> cutting silence with auto-editor")
-		if err := autoEdit(autoEditorPath, remuxed, final, opts.Margin, opts.Speed); err != nil {
+		r := opts.newStageReporter(start, 3)
+		r.report(0)
+		if err := autoEdit(autoEditorPath, remuxed, final, opts.Margin, opts.Speed, r.report); err != nil {
 			return "", err
 		}
 	} else {
 		opts.logf("==> using cached auto-edit result")
 	}
+	opts.logf("==> done (100%% overall)")
 
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating output dir: %w", err)

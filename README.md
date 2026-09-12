@@ -34,6 +34,89 @@ trimming pauses, cutting background hiss, isn't. vidpolish automates that
 part so a five-minute rough recording turns into a tight, clean clip in one
 command, without you touching a timeline editor.
 
+## Screenshots
+
+A quick tour of the local UI (`vidpolish ui`) — the same "Projects"
+notebook model described in [Local UI](#local-ui) below.
+
+<table>
+<tr><td width="50%">
+
+**Projects list** — every project you've started, one click to open.
+
+<img src="media/screenshots/01-projects-list.png" width="100%">
+
+</td><td width="50%">
+
+**A project's notebook view** — source cell, several edit-cell speed
+variants, and upload cells, all in one scrollable page with drag-to-reorder
+within each section.
+
+<img src="media/screenshots/02-project-view.png" width="100%">
+
+</td></tr>
+<tr><td width="50%">
+
+**Category quick-nav + collapse-all** — jump between Source/Edit/Upload
+sections, or collapse every cell down to its header row.
+
+<img src="media/screenshots/05-project-header.png" width="100%">
+
+</td><td width="50%">
+
+**Collapsed cells** — a compact overview of a project once you don't need
+every cell expanded.
+
+<img src="media/screenshots/06-collapsed-cells.png" width="100%">
+
+</td></tr>
+<tr><td width="50%">
+
+**An edit cell** — margin/speed controls, a live video preview once it's
+run, Download, and "Add upload from this edit" as the primary next step.
+
+<img src="media/screenshots/03-edit-cell.png" width="100%">
+
+</td><td width="50%">
+
+**Live thumbnail preview** — the auto-generated YouTube thumbnail updates
+as you type the title, before you've even run the upload.
+
+<img src="media/screenshots/04-upload-cell-live-preview.png" width="100%">
+
+</td></tr>
+<tr><td width="50%">
+
+**A finished upload** — the YouTube link appears as soon as it's known,
+in a copyable box (with a dedicated Copy button) rather than a bare link.
+
+<img src="media/screenshots/04-upload-cell-done.png" width="100%">
+
+</td><td width="50%">
+
+**Tool status** — the same checks as `vidpolish deps`, with a re-check
+button per tool.
+
+<img src="media/screenshots/08-tools.png" width="100%">
+
+</td></tr>
+<tr><td width="50%">
+
+**Config panel** — YouTube credentials (secrets masked), upload defaults,
+and thumbnail styling, with automatic backups before every save.
+
+<img src="media/screenshots/07-config.png" width="100%">
+
+</td><td width="50%">
+
+**Cache panel** — shows which project a cache entry belongs to, and makes
+clear that deleting an entry never deletes the project itself.
+
+<img src="media/screenshots/09-cache.png" width="100%">
+
+</td></tr>
+</table>
+
 ## Prerequisites
 
 You need Go and `ffmpeg` installed before building or running vidpolish.

@@ -21,6 +21,8 @@ export const api = {
   getCell: (id) => request('GET', `/api/cells/${id}`),
   runCell: (id) => request('POST', `/api/cells/${id}/run`),
   deleteCell: (id) => request('DELETE', `/api/cells/${id}`),
+  reorderCells: (projectId, kind, orderedCellIds) =>
+    request('POST', `/api/projects/${projectId}/reorder`, { kind, orderedCellIds }),
 
   uploadSource: async (cellId, file, onProgress) => {
     return new Promise((resolve, reject) => {
@@ -55,8 +57,23 @@ export const api = {
     return () => es.close();
   },
 
+  previewThumbnail: async (title) => {
+    const res = await fetch('/api/thumbnail/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || res.statusText);
+    }
+    return res.blob();
+  },
+
   getConfig: () => request('GET', '/api/config'),
   putConfig: (body) => request('PUT', '/api/config', body),
+  listConfigBackups: () => request('GET', '/api/config/backups'),
+  restoreConfigBackup: (timestamp) => request('POST', `/api/config/backups/${timestamp}/restore`, {}),
   startYouTubeLogin: () => request('POST', '/api/youtube/login', {}),
   subscribeYouTubeLoginEvents: (onMessage) => {
     const es = new EventSource('/api/youtube/login/events');

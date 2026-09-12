@@ -8,6 +8,19 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
+/* Every clickable thing shows a pointer cursor, not the default arrow. */
+button:not(:disabled),
+a[href],
+[role="button"],
+select,
+input[type="checkbox"],
+input[type="color"] {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
 .btn-primary {
   @apply inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-600 hover:bg-cyan-500 text-white;
 }
