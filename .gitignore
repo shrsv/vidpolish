@@ -6,3 +6,4 @@
 *.mkv
 /vidpolish
 /.claude/
+/web/node_modules/

@@ -4,20 +4,26 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
-	"text/template"
 	"time"
 
 	"vidpolish/internal/binmgr"
+	"vidpolish/internal/browseropen"
 	"vidpolish/internal/cache"
 	"vidpolish/internal/config"
 	"vidpolish/internal/pipeline"
+	"vidpolish/internal/server"
+	"vidpolish/internal/store"
 	"vidpolish/internal/thumbnail"
 	"vidpolish/internal/ytauth"
+	"vidpolish/internal/ytmeta"
 	"vidpolish/internal/ytupload"
 )
 
@@ -40,6 +46,8 @@ func main() {
 		runYouTube(os.Args[2:])
 	case "upload":
 		runUpload(os.Args[2:])
+	case "ui":
+		runUI(os.Args[2:])
 	default:
 		usage()
 		os.Exit(1)
@@ -55,7 +63,48 @@ Usage:
   vidpolish cache clean
   vidpolish config init
   vidpolish youtube login
-  vidpolish upload <video.mp4> [flags]`)
+  vidpolish upload <video.mp4> [flags]
+  vidpolish ui [--port 7890] [--no-open]`)
+}
+
+func runUI(args []string) {
+	fs := flag.NewFlagSet("ui", flag.ExitOnError)
+	port := fs.Int("port", 7890, "port to serve the local UI on")
+	noOpen := fs.Bool("no-open", false, "don't open a browser automatically")
+	fs.Parse(args)
+
+	db, err := store.Open()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	addr := fmt.Sprintf("127.0.0.1:%d", *port)
+	srv := &http.Server{Addr: addr, Handler: server.New(db).Handler()}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdownCtx)
+	}()
+
+	url := "http://" + addr
+	fmt.Println("==> vidpolish UI listening on", url)
+	if !*noOpen {
+		if err := browseropen.Open(url); err != nil {
+			fmt.Println("==> could not open a browser automatically; open the URL above manually")
+		}
+	}
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 }
 
 func runProcess(args []string) {
@@ -214,8 +263,10 @@ func doUpload(path string, f uploadFlags) {
 		language = cfg.YouTube.DefaultLanguage
 	}
 
-	tags := buildTags(cfg.YouTube.DefaultTags)
-	description := buildDescription(cfg.YouTube.DescriptionTemplate, title)
+	tags := ytmeta.MergeTags(cfg.YouTube.DefaultTags)
+	description := ytmeta.BuildDescription(cfg.YouTube.DescriptionTemplate, title, func(msg string) {
+		fmt.Fprintln(os.Stderr, "warning:", msg)
+	})
 
 	thumbnailPath := f.ThumbnailPath
 	if thumbnailPath == "" && !f.NoThumbnail && cfg.Thumbnail.Enabled {
@@ -268,51 +319,6 @@ func doUpload(path string, f uploadFlags) {
 	if !f.NoWait {
 		fmt.Println("==> done, video is fully processed:", result.URL)
 	}
-}
-
-// buildTags merges configured default tags with the fixed "vidpolish"
-// tag, deduplicating while preserving order (fixed tag first).
-func buildTags(defaultTags []string) []string {
-	tags := []string{"vidpolish"}
-	seen := map[string]bool{"vidpolish": true}
-	for _, t := range defaultTags {
-		if t == "" || seen[t] {
-			continue
-		}
-		seen[t] = true
-		tags = append(tags, t)
-	}
-	return tags
-}
-
-// buildDescription renders tmplText with {{.Title}}, ensuring the literal
-// word "vidpolish" always appears even if the template omits it.
-func buildDescription(tmplText, title string) string {
-	rendered := renderDescriptionTemplate(tmplText, title)
-	if !strings.Contains(rendered, "vidpolish") {
-		if rendered != "" {
-			rendered += "\n\n"
-		}
-		rendered += "vidpolish"
-	}
-	return rendered
-}
-
-func renderDescriptionTemplate(tmplText, title string) string {
-	if tmplText == "" {
-		return ""
-	}
-	tmpl, err := template.New("description").Parse(tmplText)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "warning: invalid description_template, falling back to plain title:", err)
-		return title
-	}
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, struct{ Title string }{title}); err != nil {
-		fmt.Fprintln(os.Stderr, "warning: rendering description_template failed, falling back to plain title:", err)
-		return title
-	}
-	return buf.String()
 }
 
 func formatETA(d time.Duration) string {

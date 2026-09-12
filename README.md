@@ -39,7 +39,9 @@ command, without you touching a timeline editor.
 You need Go and `ffmpeg` installed before building or running vidpolish.
 Everything else (`deep-filter`, `auto-editor`, `resvg`, the Inter font) is
 fetched automatically the first time you run the tool, so you do not need
-to install those by hand.
+to install those by hand. Node.js is only needed if you're editing the
+local UI's frontend (see [Local UI](#local-ui)); the built frontend is
+committed to the repo, so a plain `go build` never requires Node.
 
 | Tool | Why it's needed | How to get it |
 | --- | --- | --- |
@@ -335,30 +337,99 @@ model to use for auto-generated captions. Setting it correctly improves
 caption accuracy and availability, but does not force captions to appear
 on any particular schedule.
 
+## Local UI
+
+```sh
+./vidpolish ui
+```
+
+Starts a small local web app, embedded in the `vidpolish` binary itself
+(no separate server or process to run), and opens it in your browser at
+`http://127.0.0.1:7890` (`--port` to change it, `--no-open` to skip
+launching a browser). It binds to `127.0.0.1` only and has no login page
+of its own — the same local-machine trust model as running the CLI.
+
+### The "Projects" model
+
+The UI is organized around **Projects**, notebook-style. Each project is
+an ordered list of **cells**:
+
+- **Source cell** (`#1`, always first): drag a video in, or use the file
+  picker. Created automatically with the project.
+- **Edit cells**: denoise + cut at a chosen margin/speed, each its own
+  named, independently runnable cell (e.g. "1.25x draft", "slow calm
+  cut"). Add as many as you want at different speeds; they share the
+  same underlying denoise/split work via the same cache
+  `process` uses, so trying five speeds doesn't denoise five times, and
+  running several at once is safe (the shared stage is serialized
+  per-source internally, the fast parts run in parallel).
+- **Upload cells**: pick which edit cell's output to push to YouTube,
+  set title/description/tags/privacy per cell, and run it. Multiple
+  upload cells can target the same or different edit cells and run
+  concurrently.
+
+Every cell has a stable number (`#2`, `#3`, ...) assigned once and never
+reused, even if you reorder or delete other cells, plus an optional
+custom name you can set any time — both work as a way to refer back to
+that cell. Running cells stream live progress (the same stage/status
+lines the CLI prints) over the page in real time, and edit-cell/upload
+results (a video player, a clickable YouTube link) appear as soon as
+they're ready — link included, same as the CLI, before YouTube finishes
+processing.
+
+### Config, tools, and cache panels
+
+The **Config** tab manages `~/.vidpolish/config.toml` from the browser:
+YouTube credentials (client secret and refresh token are never sent back
+to the browser in full, only a short preview, so the page is safe to
+leave open), upload defaults, and thumbnail settings, plus a "Connect
+YouTube" button that runs the same OAuth flow as `vidpolish youtube
+login`. The **Tools** tab shows the same resolution status as `vidpolish
+deps` with a re-check button per tool. The **Cache** tab lists
+`~/.vidpolish/cache` entries with size/age and lets you delete one or
+clean all expired entries, equivalent to `vidpolish cache clean`.
+
+### Developing the UI itself
+
+The frontend lives in `web/` (Preact + Vite + Tailwind) and builds into
+`internal/server/webdist/`, which is committed to the repo and embedded
+via `go:embed`. Building the `vidpolish` binary never requires Node —
+only editing the UI does:
+
+```sh
+cd web
+npm install
+npm run dev     # Vite dev server with hot reload, proxies /api to :7890
+npm run build   # writes internal/server/webdist for `go build` to embed
+```
+
 ## Project layout
 
 ```
-cmd/vidpolish        CLI entrypoint (flag parsing, wiring)
-internal/binmgr       resolves/downloads deep-filter, auto-editor, resvg, and the Inter font
-internal/cache        the ~/.vidpolish/cache artifact cache
-internal/config       ~/.vidpolish/config.toml load/init/save
-internal/pipeline     the split / denoise / remux / auto-edit stages
-internal/thumbnail    SVG-based thumbnail generation, rasterized via resvg
-internal/ytauth       YouTube OAuth 2.0 installed-app login flow
-internal/ytupload     resumable YouTube upload with progress/ETA and thumbnail set
-media/                logo assets
+cmd/vidpolish         CLI entrypoint (flag parsing, wiring)
+internal/binmgr        resolves/downloads deep-filter, auto-editor, resvg, and the Inter font
+internal/browseropen   opens a URL in the default browser
+internal/cache         the ~/.vidpolish/cache artifact cache
+internal/config        ~/.vidpolish/config.toml load/init/save
+internal/pipeline      the split / denoise / remux / auto-edit stages
+internal/server        the embedded local UI's HTTP API and static frontend
+internal/store         SQLite-backed Projects/Cells storage (~/.vidpolish/vidpolish.db)
+internal/thumbnail     SVG-based thumbnail generation, rasterized via resvg
+internal/ytauth        YouTube OAuth 2.0 installed-app login flow
+internal/ytmeta        shared tag/description building for uploads
+internal/ytupload      resumable YouTube upload with progress/ETA and thumbnail set
+media/                 logo assets
+web/                   Preact/Vite source for the local UI
 ```
 
 ## Status and roadmap
 
 vidpolish covers the local processing pipeline (split, denoise, cut,
-optional speed changes, with caching) and uploading the result to YouTube
-as unlisted-by-default, with progress, ETA, language metadata, default
-tags/description, and an auto-generated thumbnail.
-
-Planned next:
-
-- A UI on top of the same library/CLI.
+optional speed changes, with caching), uploading the result to YouTube
+as unlisted-by-default with progress, ETA, language metadata, default
+tags/description, and an auto-generated thumbnail, and a local
+"Projects" UI (`vidpolish ui`) built on top of the same library, with
+config/tools/cache management panels.
 
 ## Development
 

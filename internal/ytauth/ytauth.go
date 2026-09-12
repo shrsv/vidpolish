@@ -13,10 +13,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
+
+	"vidpolish/internal/browseropen"
 )
 
 // UploadScope is the OAuth scope required to upload videos.
@@ -31,11 +31,25 @@ const (
 // listener, opens the consent page in the user's browser, waits for the
 // authorization code, and exchanges it for a refresh token.
 func Login(clientID, clientSecret string) (refreshToken string, err error) {
+	_, wait, err := StartLogin(clientID, clientSecret)
+	if err != nil {
+		return "", err
+	}
+	return wait()
+}
+
+// StartLogin begins the installed-app OAuth flow: it starts a local
+// redirect listener and returns the consent URL immediately (having
+// already made a best-effort attempt to open it in a browser), without
+// waiting for the user to complete it. Call the returned wait function to
+// block until the user finishes (or 5 minutes elapse), exchanging the
+// resulting code for a refresh token. This split lets a caller (e.g. a
+// web UI) show/relay the URL right away instead of blocking on it.
+func StartLogin(clientID, clientSecret string) (authURL string, wait func() (string, error), err error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return "", fmt.Errorf("starting local redirect listener: %w", err)
+		return "", nil, fmt.Errorf("starting local redirect listener: %w", err)
 	}
-	defer listener.Close()
 
 	port := listener.Addr().(*net.TCPAddr).Port
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
@@ -61,23 +75,27 @@ func Login(clientID, clientSecret string) (refreshToken string, err error) {
 	})
 	server := &http.Server{Handler: mux}
 	go server.Serve(listener)
-	defer server.Close()
 
-	authURL := buildAuthURL(clientID, redirectURI)
+	authURL = buildAuthURL(clientID, redirectURI)
 	fmt.Println("==> opening browser for YouTube authorization:")
 	fmt.Println("   ", authURL)
-	if err := openBrowser(authURL); err != nil {
+	if err := browseropen.Open(authURL); err != nil {
 		fmt.Println("==> could not open a browser automatically; open the URL above manually")
 	}
 
-	select {
-	case code := <-codeCh:
-		return exchangeCode(clientID, clientSecret, code, redirectURI)
-	case err := <-errCh:
-		return "", err
-	case <-time.After(5 * time.Minute):
-		return "", fmt.Errorf("timed out waiting for authorization")
+	wait = func() (string, error) {
+		defer server.Close()
+		defer listener.Close()
+		select {
+		case code := <-codeCh:
+			return exchangeCode(clientID, clientSecret, code, redirectURI)
+		case err := <-errCh:
+			return "", err
+		case <-time.After(5 * time.Minute):
+			return "", fmt.Errorf("timed out waiting for authorization")
+		}
 	}
+	return authURL, wait, nil
 }
 
 func buildAuthURL(clientID, redirectURI string) string {
@@ -89,19 +107,6 @@ func buildAuthURL(clientID, redirectURI string) string {
 	v.Set("access_type", "offline")
 	v.Set("prompt", "consent")
 	return authEndpoint + "?" + v.Encode()
-}
-
-func openBrowser(target string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", target)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
-	default:
-		cmd = exec.Command("xdg-open", target)
-	}
-	return cmd.Start()
 }
 
 type tokenResponse struct {

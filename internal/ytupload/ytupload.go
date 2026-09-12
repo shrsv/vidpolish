@@ -57,6 +57,20 @@ type Options struct {
 	// processing-status wait. The link is valid to share immediately;
 	// it does not need to wait for YouTube to finish processing.
 	OnUploaded func(result *Result)
+
+	// Log, if set, receives processing-status messages instead of them
+	// being printed to stdout. Callers that don't set it (e.g. the CLI)
+	// get the original stdout behavior unchanged.
+	Log func(string)
+}
+
+func (o Options) logf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if o.Log != nil {
+		o.Log(msg)
+		return
+	}
+	fmt.Println(msg)
 }
 
 // Result is returned after a successful upload.
@@ -122,7 +136,7 @@ func Upload(path string, opts Options) (*Result, error) {
 	}
 
 	if !opts.NoWait {
-		waitForProcessing(opts.AccessToken, video.ID)
+		waitForProcessing(opts.AccessToken, video.ID, opts)
 	}
 
 	return result, nil
@@ -266,12 +280,12 @@ func setThumbnail(accessToken, videoID, path string) error {
 // report when initial processing finishes. It never returns an error;
 // failures or timeouts just mean the caller prints the link without a
 // processed confirmation.
-func waitForProcessing(accessToken, videoID string) {
+func waitForProcessing(accessToken, videoID string, opts Options) {
 	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		status, err := fetchProcessingStatus(accessToken, videoID)
 		if err == nil {
-			fmt.Println("==> processing status:", status)
+			opts.logf("==> processing status: %s", status)
 			if status == "succeeded" || status == "failed" || status == "terminated" {
 				return
 			}

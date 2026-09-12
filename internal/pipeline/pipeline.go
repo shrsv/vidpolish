@@ -25,9 +25,23 @@ type Options struct {
 	Margin    string  // auto-editor --margin value, e.g. "0.2s"
 	Speed     float64 // playback speed multiplier for kept/spoken segments; 1.0 = unchanged
 	NoCache   bool    // if true, ignore existing cache entries and recompute everything
+
+	// Log, if set, receives stage-progress messages instead of them being
+	// printed to stdout. Callers that don't set it (e.g. the CLI) get the
+	// original stdout behavior unchanged.
+	Log func(string)
 }
 
 const editMethod = "audio"
+
+func (o Options) logf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if o.Log != nil {
+		o.Log(msg)
+		return
+	}
+	fmt.Println(msg)
+}
 
 // Process runs the full split -> denoise -> auto-edit pipeline on
 // opts.Input and returns the path to the final output file.
@@ -66,45 +80,59 @@ func Process(opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("==> cache dir:", dir)
+	opts.logf("==> cache dir: %s", dir)
 
 	videoOnly := filepath.Join(dir, "video.mp4")
 	rawAudio := filepath.Join(dir, "audio.wav")
 	denoisedDir := filepath.Join(dir, "denoised")
 	remuxed := filepath.Join(dir, "remuxed.mp4")
 
+	// The split/denoise/remux stage is keyed only by the source
+	// fingerprint (not by margin/speed), so concurrent Process calls on
+	// the same input (e.g. several speed-variant "edit" cells started in
+	// parallel) would otherwise all see it as not-yet-cached and race to
+	// redo it at once. Serialize just this shared stage per fingerprint;
+	// the params-dependent final cut below still runs unlocked, so
+	// parallel variants proceed concurrently once the shared stage is
+	// ready.
+	unlock := cache.Lock(fp)
 	if opts.NoCache || !exists(videoOnly) || !exists(rawAudio) {
-		fmt.Println("==> splitting video and audio")
+		opts.logf("==> splitting video and audio")
 		if err := splitVideoAudio(ffmpegPath, opts.Input, videoOnly, rawAudio); err != nil {
+			unlock()
 			return "", err
 		}
 	} else {
-		fmt.Println("==> using cached split video/audio")
+		opts.logf("==> using cached split video/audio")
 	}
 
 	var denoisedAudio string
 	if opts.NoCache || !dirHasWav(denoisedDir) {
-		fmt.Println("==> denoising audio")
+		opts.logf("==> denoising audio")
 		denoisedAudio, err = denoise(deepFilterPath, rawAudio, denoisedDir)
 		if err != nil {
+			unlock()
 			return "", err
 		}
 	} else {
-		fmt.Println("==> using cached denoised audio")
+		opts.logf("==> using cached denoised audio")
 		denoisedAudio, err = firstWavIn(denoisedDir)
 		if err != nil {
+			unlock()
 			return "", err
 		}
 	}
 
 	if opts.NoCache || !exists(remuxed) {
-		fmt.Println("==> remuxing cleaned audio with video")
+		opts.logf("==> remuxing cleaned audio with video")
 		if err := muxVideoAudio(ffmpegPath, videoOnly, denoisedAudio, remuxed); err != nil {
+			unlock()
 			return "", err
 		}
 	} else {
-		fmt.Println("==> using cached remux")
+		opts.logf("==> using cached remux")
 	}
+	unlock()
 
 	if err := cache.Touch(dir); err != nil {
 		fmt.Fprintf(os.Stderr, "vidpolish: cache touch warning: %v\n", err)
@@ -118,12 +146,12 @@ func Process(opts Options) (string, error) {
 	final := filepath.Join(dir, "final-"+paramsKey+".mp4")
 
 	if opts.NoCache || !exists(final) {
-		fmt.Println("==> cutting silence with auto-editor")
+		opts.logf("==> cutting silence with auto-editor")
 		if err := autoEdit(autoEditorPath, remuxed, final, opts.Margin, opts.Speed); err != nil {
 			return "", err
 		}
 	} else {
-		fmt.Println("==> using cached auto-edit result")
+		opts.logf("==> using cached auto-edit result")
 	}
 
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {

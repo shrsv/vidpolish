@@ -13,8 +13,31 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// fingerprintLocks serializes work against the same cache fingerprint
+// within this process. Without it, two concurrent Process runs on the
+// same source video (e.g. two "edit" cells at different speeds, started
+// in parallel from the UI) would both see the shared split/denoise/remux
+// stage as "not cached yet" and redundantly race to denoise into the same
+// directory at once. It does not slow down concurrent runs on different
+// source videos, and only guards the shared stage, not the
+// params-dependent final cut, so parallel speed variants still run their
+// own auto-editor pass concurrently once the shared stage is ready.
+var fingerprintLocks sync.Map // fingerprint string -> *sync.Mutex
+
+// Lock acquires an exclusive lock for fingerprint, returning an unlock
+// function. Callers should hold it only around the parts of pipeline
+// processing that write shared, fingerprint-keyed (not params-keyed)
+// cache artifacts.
+func Lock(fingerprint string) (unlock func()) {
+	muAny, _ := fingerprintLocks.LoadOrStore(fingerprint, &sync.Mutex{})
+	mu := muAny.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
 
 // DefaultTTL is how long a cache entry is kept before Sweep removes it.
 const DefaultTTL = 7 * 24 * time.Hour
@@ -139,6 +162,58 @@ func readCachedAt(dir string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return time.Unix(sec, 0), nil
+}
+
+// Entry describes one cache directory, for cache-management UIs.
+type Entry struct {
+	Fingerprint string
+	SizeBytes   int64
+	CachedAt    time.Time // zero if the entry has no .cached-at marker
+}
+
+// ListEntries returns one Entry per cache directory under root.
+func ListEntries(root string) ([]Entry, error) {
+	dirs, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listing cache root %s: %w", root, err)
+	}
+
+	var out []Entry
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, d.Name())
+		size, err := dirSize(dir)
+		if err != nil {
+			return nil, fmt.Errorf("sizing %s: %w", dir, err)
+		}
+		cachedAt, _ := readCachedAt(dir) // zero value if missing/unparseable
+		out = append(out, Entry{Fingerprint: d.Name(), SizeBytes: size, CachedAt: cachedAt})
+	}
+	return out, nil
+}
+
+func dirSize(dir string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	return total, err
 }
 
 // ParamsKey returns a short, deterministic key derived from fields, used to
