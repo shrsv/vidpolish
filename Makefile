@@ -1,4 +1,5 @@
-.PHONY: build ui dev web-install web-build web-dev test vet fmt deps clean
+.PHONY: build ui dev web-install web-build web-dev test vet fmt deps clean \
+	version bump-patch bump-minor bump-major tag-release release-build release-publish
 
 # Build the vidpolish binary (embeds internal/server/webdist as-is;
 # run `make web-build` first if you've changed the frontend).
@@ -56,3 +57,67 @@ deps: build
 # ~/.vidpolish state.
 clean:
 	rm -f vidpolish
+
+# --- Release process ---------------------------------------------------
+#
+# Typical flow:
+#   make bump-patch          # or bump-minor / bump-major
+#   git diff VERSION         # review
+#   make tag-release         # commits VERSION + creates annotated tag
+#   git push && git push --tags
+#   make release-publish     # cross-compiles + publishes a GitHub Release
+
+# Print the current version (from the VERSION file).
+version:
+	@cat VERSION
+
+# Bump the patch/minor/major component of VERSION in place (semver, no
+# commit/tag — review the change before running `make tag-release`).
+bump-patch:
+	@awk -F. '{printf "%d.%d.%d\n", $$1, $$2, $$3+1}' VERSION > VERSION.tmp
+	@mv VERSION.tmp VERSION
+	@cat VERSION
+
+bump-minor:
+	@awk -F. '{printf "%d.%d.%d\n", $$1, $$2+1, 0}' VERSION > VERSION.tmp
+	@mv VERSION.tmp VERSION
+	@cat VERSION
+
+bump-major:
+	@awk -F. '{printf "%d.%d.%d\n", $$1+1, 0, 0}' VERSION > VERSION.tmp
+	@mv VERSION.tmp VERSION
+	@cat VERSION
+
+# Commit VERSION and create an annotated tag vX.Y.Z for the current
+# contents of VERSION. Refuses to run on a dirty tree or if the tag
+# already exists. Does not push.
+tag-release:
+	@V=$$(cat VERSION); \
+	if [ -n "$$(git status --porcelain -- . ':!VERSION')" ]; then \
+		echo "error: working tree has uncommitted changes outside VERSION; commit or stash first" >&2; \
+		exit 1; \
+	fi; \
+	if git rev-parse "v$$V" >/dev/null 2>&1; then \
+		echo "error: tag v$$V already exists" >&2; \
+		exit 1; \
+	fi; \
+	git add VERSION; \
+	git commit -m "Release v$$V"; \
+	git tag -a "v$$V" -m "v$$V"; \
+	echo "tagged v$$V (run: git push && git push --tags)"
+
+# Cross-compile release binaries for all supported platforms into
+# dist/v<VERSION>/ (see scripts/release-build.sh).
+release-build:
+	@./scripts/release-build.sh "$$(cat VERSION)"
+
+# Build (if needed) and publish a GitHub Release with the cross-compiled
+# binaries and checksums.txt attached. Requires `gh` to be authenticated.
+# Pass DRAFT=1 to publish as a draft (not publicly visible until you
+# publish it from the GitHub UI or `gh release edit --draft=false`).
+release-publish: release-build
+	@V=$$(cat VERSION); \
+	DRAFT_FLAG=""; \
+	if [ "$(DRAFT)" = "1" ]; then DRAFT_FLAG="--draft"; fi; \
+	gh release create "v$$V" dist/v$$V/vidpolish-* dist/v$$V/checksums.txt \
+		--title "v$$V" --generate-notes $$DRAFT_FLAG

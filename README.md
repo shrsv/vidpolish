@@ -10,6 +10,35 @@
 
 ---
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/shrsv/vidpolish/main/scripts/install.sh | bash
+```
+
+This downloads the right prebuilt binary for your OS/arch from the
+[latest release](https://github.com/shrsv/vidpolish/releases/latest),
+installs it to `~/.local/bin`, wires up your `PATH`, and runs `vidpolish
+deps` so ffmpeg is checked and the other tool dependencies (deep-filter,
+auto-editor, resvg, font) are fetched right away. Supported platforms:
+Linux (amd64/arm64) and macOS (amd64/arm64); Windows users can grab
+`vidpolish-windows-amd64.exe` directly from the releases page.
+
+Then either run it once:
+
+```sh
+vidpolish process <input.mp4>
+```
+
+or start the [local UI](#local-ui):
+
+```sh
+vidpolish ui
+```
+
+Building from source (`make build`, or `go install`) still works as before
+if you'd rather not use the installer.
+
 ## What it does
 
 vidpolish takes a raw talking-head or screen recording and runs it through a

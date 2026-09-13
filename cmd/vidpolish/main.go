@@ -27,6 +27,12 @@ import (
 	"vidpolish/internal/ytupload"
 )
 
+// version is the vidpolish release version. It defaults to "dev" for
+// locally built binaries (plain `go build` / `make build`); release builds
+// override it via `-ldflags "-X main.version=X.Y.Z"` (see
+// scripts/release-build.sh).
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -48,6 +54,8 @@ func main() {
 		runUpload(os.Args[2:])
 	case "ui":
 		runUI(os.Args[2:])
+	case "version", "--version", "-v":
+		fmt.Println("vidpolish", version)
 	default:
 		usage()
 		os.Exit(1)
@@ -64,7 +72,8 @@ Usage:
   vidpolish config init
   vidpolish youtube login
   vidpolish upload <video.mp4> [flags]
-  vidpolish ui [--port 7890] [--no-open]`)
+  vidpolish ui [--port 7890] [--no-open]
+  vidpolish version`)
 }
 
 func runUI(args []string) {
