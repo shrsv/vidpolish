@@ -101,9 +101,9 @@ tag-release:
 		echo "error: tag v$$V already exists" >&2; \
 		exit 1; \
 	fi; \
-	git add VERSION; \
-	git commit -m "Release v$$V"; \
-	git tag -a "v$$V" -m "v$$V"; \
+	git add VERSION && \
+	git commit -m "Release v$$V" && \
+	git tag -a "v$$V" -m "v$$V" && \
 	echo "tagged v$$V (run: git push && git push --tags)"
 
 # Cross-compile release binaries for all supported platforms into
