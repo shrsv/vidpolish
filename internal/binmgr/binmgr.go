@@ -14,7 +14,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
+
+	"github.com/dustin/go-humanize"
 )
+
+// httpClient bounds the total time a download may take, so a stalled
+// connection fails with a clear error instead of hanging silently forever.
+var httpClient = &http.Client{Timeout: 10 * time.Minute}
 
 const (
 	deepFilterVersion = "0.5.6"
@@ -181,12 +188,14 @@ func downloadAndInstall(url, archiveExt, binPath string) error {
 	return os.Chmod(binPath, 0o755)
 }
 
-// downloadToTemp fetches url into a temp file under dir and returns its
-// path. The caller is responsible for removing it.
+// downloadToTemp fetches url into a temp file under dir, printing a live
+// progress line to stderr (percentage/size/speed/ETA when the server
+// reports Content-Length, otherwise just bytes-so-far and speed), and
+// returns the temp file's path. The caller is responsible for removing it.
 func downloadToTemp(url, dir string) (string, error) {
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
-		return "", fmt.Errorf("fetching %s: %w", url, err)
+		return "", fmt.Errorf("fetching %s: %w (check your network connection and try again)", url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -199,13 +208,67 @@ func downloadToTemp(url, dir string) (string, error) {
 	}
 	tmpPath := tmp.Name()
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	pw := &progressWriter{total: resp.ContentLength, start: time.Now()}
+	if _, err := io.Copy(tmp, io.TeeReader(resp.Body, pw)); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("saving download: %w", err)
+		fmt.Fprintln(os.Stderr)
+		return "", fmt.Errorf("downloading %s: %w (check your network connection and try again)", url, err)
 	}
+	pw.finish()
 	tmp.Close()
 	return tmpPath, nil
+}
+
+// progressWriter renders a single, periodically-updated progress line to
+// stderr as bytes flow through it (used via io.TeeReader around a download
+// body), so a large fetch never looks like it's simply hung.
+type progressWriter struct {
+	total     int64
+	written   int64
+	start     time.Time
+	lastPrint time.Time
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	pw.written += int64(n)
+
+	now := time.Now()
+	if now.Sub(pw.lastPrint) < 200*time.Millisecond {
+		return n, nil
+	}
+	pw.lastPrint = now
+	pw.render(now)
+	return n, nil
+}
+
+func (pw *progressWriter) render(now time.Time) {
+	elapsed := now.Sub(pw.start).Seconds()
+	var speed float64
+	if elapsed > 0 {
+		speed = float64(pw.written) / elapsed
+	}
+
+	if pw.total > 0 {
+		pct := float64(pw.written) / float64(pw.total) * 100
+		eta := "..."
+		if speed > 0 {
+			remaining := float64(pw.total - pw.written)
+			eta = time.Duration(remaining / speed * float64(time.Second)).Round(time.Second).String()
+		}
+		fmt.Fprintf(os.Stderr, "\r  %5.1f%%  %s / %s  %s/s  ETA %-8s", pct,
+			humanize.Bytes(uint64(pw.written)), humanize.Bytes(uint64(pw.total)),
+			humanize.Bytes(uint64(speed)), eta)
+	} else {
+		fmt.Fprintf(os.Stderr, "\r  %s downloaded  %s/s", humanize.Bytes(uint64(pw.written)), humanize.Bytes(uint64(speed)))
+	}
+}
+
+// finish renders one last, complete progress line and moves to a new line.
+func (pw *progressWriter) finish() {
+	pw.render(time.Now())
+	fmt.Fprintln(os.Stderr)
 }
 
 // extractSingleFromZip extracts the first regular file it finds in the zip

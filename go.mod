@@ -4,12 +4,12 @@ go 1.24.3
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/dustin/go-humanize v1.0.1
 	github.com/google/uuid v1.6.0
 	modernc.org/sqlite v1.34.4
 )
 
 require (
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect

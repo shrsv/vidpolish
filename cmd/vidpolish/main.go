@@ -338,6 +338,17 @@ func formatETA(d time.Duration) string {
 	return d.String()
 }
 
+// formatElapsed renders a completed duration, always as a concrete value
+// (unlike formatETA, which uses "..." for a not-yet-estimable remaining
+// time) — sub-second work shows as "<1s" rather than "0s".
+func formatElapsed(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d <= 0 {
+		return "<1s"
+	}
+	return d.String()
+}
+
 func runCache(args []string) {
 	if len(args) != 1 || args[0] != "clean" {
 		fmt.Fprintln(os.Stderr, "usage: vidpolish cache clean")
@@ -397,17 +408,38 @@ func reorderFlags(args []string) []string {
 }
 
 func runDeps() {
-	for _, tool := range []binmgr.Tool{binmgr.FFmpeg, binmgr.FFprobe, binmgr.DeepFilter, binmgr.AutoEditor, binmgr.Resvg} {
+	tools := []binmgr.Tool{binmgr.FFmpeg, binmgr.FFprobe, binmgr.DeepFilter, binmgr.AutoEditor, binmgr.Resvg}
+	total := len(tools) + 1 // +1 for the font, checked separately below
+	start := time.Now()
+	failed := 0
+
+	fmt.Printf("==> Checking %d dependencies (this only downloads what's missing)\n", total)
+
+	for i, tool := range tools {
+		fmt.Printf("[%d/%d] %s...\n", i+1, total, tool)
+		toolStart := time.Now()
 		path, err := binmgr.Resolve(tool)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%-12s ERROR: %v\n", tool, err)
+			failed++
+			fmt.Fprintf(os.Stderr, "[%d/%d] %-12s ERROR: %v\n", i+1, total, tool, err)
 			continue
 		}
-		fmt.Printf("%-12s %s\n", tool, path)
+		fmt.Printf("[%d/%d] %-12s ready (%s) in %s\n", i+1, total, tool, path, formatElapsed(time.Since(toolStart)))
 	}
+
+	fmt.Printf("[%d/%d] font...\n", total, total)
+	fontStart := time.Now()
 	if regular, bold, err := binmgr.ResolveFont(); err != nil {
-		fmt.Fprintf(os.Stderr, "%-12s ERROR: %v\n", "font", err)
+		failed++
+		fmt.Fprintf(os.Stderr, "[%d/%d] %-12s ERROR: %v\n", total, total, "font", err)
 	} else {
-		fmt.Printf("%-12s %s, %s\n", "font", regular, bold)
+		fmt.Printf("[%d/%d] %-12s ready (%s, %s) in %s\n", total, total, "font", regular, bold, formatElapsed(time.Since(fontStart)))
 	}
+
+	elapsed := time.Since(start).Round(time.Second)
+	if failed > 0 {
+		fmt.Printf("==> done in %s, but %d/%d dependencies failed (see ERROR lines above)\n", elapsed, failed, total)
+		os.Exit(1)
+	}
+	fmt.Printf("==> all dependencies ready in %s\n", elapsed)
 }
