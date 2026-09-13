@@ -102,7 +102,9 @@ tag-release:
 		exit 1; \
 	fi; \
 	git add VERSION && \
-	git commit -m "Release v$$V" && \
+	if ! git diff --cached --quiet -- VERSION; then \
+		git commit -m "Release v$$V" || exit 1; \
+	fi && \
 	git tag -a "v$$V" -m "v$$V" && \
 	echo "tagged v$$V (run: git push && git push --tags)"
 
