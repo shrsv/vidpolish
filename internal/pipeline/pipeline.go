@@ -25,7 +25,17 @@ type Options struct {
 	OutputDir string  // directory the final polished video is written to
 	Margin    string  // auto-editor --margin value, e.g. "0.2s"
 	Speed     float64 // playback speed multiplier for kept/spoken segments; 1.0 = unchanged
-	NoCache   bool    // if true, ignore existing cache entries and recompute everything
+
+	// Width/Height/BitrateKbps request a resize/re-encode pass after
+	// auto-editing. 0 on all three (the default) skips that pass entirely
+	// and keeps the auto-edited output verbatim — i.e. the original
+	// resolution and bitrate. Setting only one of Width/Height scales the
+	// other to preserve the original aspect ratio.
+	Width       int
+	Height      int
+	BitrateKbps int
+
+	NoCache bool // if true, ignore existing cache entries and recompute everything
 
 	// Log, if set, receives stage-progress messages instead of them being
 	// printed to stdout. Callers that don't set it (e.g. the CLI) get the
@@ -48,29 +58,46 @@ func (o Options) logf(format string, args ...any) {
 // stage typically takes, used to map each stage's own real (or
 // estimated, for denoise) local progress into one continuously-moving
 // overall percentage and a whole-job ETA. Denoising dominates (CPU-bound
-// neural net inference); splitting is a pure stream copy so it's fast;
-// remuxing re-encodes audio to AAC so it's not instant but still quick.
+// neural net inference); splitting re-encodes video (to strip B-frames,
+// see splitVideoAudio) so it's not instant but still quick relative to
+// denoising; remuxing re-encodes audio to AAC so it's not instant either
+// but still quick.
 // These weights are estimates, not measurements — good enough to place
 // stage boundaries, not a guarantee.
-var stageBounds = []struct {
+type stageBound struct {
 	start, end float64
 	label      string
-}{
-	{0.00, 0.08, "splitting video and audio"},
-	{0.08, 0.75, "denoising audio"},
-	{0.75, 0.82, "remuxing cleaned audio with video"},
-	{0.82, 1.00, "cutting silence with auto-editor"},
 }
 
-// newStageReporter builds a reporter for stage i (0-indexed into
-// stageBounds), or a no-op if opts has no Log sink wired up by the
-// caller in a way that needs live updates (it still falls back to
-// println via logf either way).
-func (o Options) newStageReporter(jobStart time.Time, i int) *stageReporter {
-	b := stageBounds[i]
+// stageBoundsFor returns the stage plan for a run: 4 stages normally, plus
+// a 5th "resizing" stage (shrinking auto-editor's share to make room) when
+// a resize/bitrate pass is actually needed.
+func stageBoundsFor(needsResize bool) []stageBound {
+	if !needsResize {
+		return []stageBound{
+			{0.00, 0.08, "splitting video and audio"},
+			{0.08, 0.75, "denoising audio"},
+			{0.75, 0.82, "remuxing cleaned audio with video"},
+			{0.82, 1.00, "cutting silence with auto-editor"},
+		}
+	}
+	return []stageBound{
+		{0.00, 0.08, "splitting video and audio"},
+		{0.08, 0.75, "denoising audio"},
+		{0.75, 0.82, "remuxing cleaned audio with video"},
+		{0.82, 0.94, "cutting silence with auto-editor"},
+		{0.94, 1.00, "resizing / re-encoding video"},
+	}
+}
+
+// newStageReporter builds a reporter for stage i (0-indexed into bounds),
+// or a no-op if opts has no Log sink wired up by the caller in a way that
+// needs live updates (it still falls back to println via logf either way).
+func (o Options) newStageReporter(jobStart time.Time, bounds []stageBound, i int) *stageReporter {
+	b := bounds[i]
 	return &stageReporter{
 		opts: o, jobStart: jobStart,
-		stepIndex: i + 1, stepTotal: len(stageBounds),
+		stepIndex: i + 1, stepTotal: len(bounds),
 		label:        b.label,
 		overallStart: b.start, overallEnd: b.end,
 	}
@@ -140,9 +167,12 @@ func Process(opts Options) (string, error) {
 	// the params-dependent final cut below still runs unlocked, so
 	// parallel variants proceed concurrently once the shared stage is
 	// ready.
+	needsResize := opts.Width > 0 || opts.Height > 0 || opts.BitrateKbps > 0
+	bounds := stageBoundsFor(needsResize)
+
 	unlock := cache.Lock(fp)
 	if opts.NoCache || !exists(videoOnly) || !exists(rawAudio) {
-		r := opts.newStageReporter(start, 0)
+		r := opts.newStageReporter(start, bounds, 0)
 		r.report(0)
 		if err := splitVideoAudio(ffmpegPath, opts.Input, videoOnly, rawAudio, duration, r.report); err != nil {
 			unlock()
@@ -154,7 +184,7 @@ func Process(opts Options) (string, error) {
 
 	var denoisedAudio string
 	if opts.NoCache || !dirHasWav(denoisedDir) {
-		r := opts.newStageReporter(start, 1)
+		r := opts.newStageReporter(start, bounds, 1)
 		r.report(0)
 		denoisedAudio, err = denoise(deepFilterPath, rawAudio, denoisedDir, duration, r.report)
 		if err != nil {
@@ -171,7 +201,7 @@ func Process(opts Options) (string, error) {
 	}
 
 	if opts.NoCache || !exists(remuxed) {
-		r := opts.newStageReporter(start, 2)
+		r := opts.newStageReporter(start, bounds, 2)
 		r.report(0)
 		if err := muxVideoAudio(ffmpegPath, videoOnly, denoisedAudio, remuxed, duration, r.report); err != nil {
 			unlock()
@@ -186,21 +216,46 @@ func Process(opts Options) (string, error) {
 		fmt.Fprintf(os.Stderr, "vidpolish: cache touch warning: %v\n", err)
 	}
 
-	paramsKey := cache.ParamsKey(
+	editedKey := cache.ParamsKey(
 		"margin="+opts.Margin,
 		"speed="+strconv.FormatFloat(opts.Speed, 'f', -1, 64),
 		"edit="+editMethod,
 	)
-	final := filepath.Join(dir, "final-"+paramsKey+".mp4")
+	edited := filepath.Join(dir, "edited-"+editedKey+".mp4")
 
-	if opts.NoCache || !exists(final) {
-		r := opts.newStageReporter(start, 3)
+	if opts.NoCache || !exists(edited) {
+		r := opts.newStageReporter(start, bounds, 3)
 		r.report(0)
-		if err := autoEdit(autoEditorPath, remuxed, final, opts.Margin, opts.Speed, r.report); err != nil {
+		if err := autoEdit(autoEditorPath, remuxed, edited, opts.Margin, opts.Speed, r.report); err != nil {
 			return "", err
 		}
 	} else {
 		opts.logf("==> using cached auto-edit result")
+	}
+
+	// Resizing/re-encoding is a separate, optional pass kept out of
+	// auto-editor's own output so leaving Width/Height/BitrateKbps unset
+	// (the default) never re-encodes video that's already correct —
+	// the auto-edited file is used verbatim as final.
+	final := edited
+	if needsResize {
+		resizeKey := cache.ParamsKey(
+			editedKey,
+			"w="+strconv.Itoa(opts.Width),
+			"h="+strconv.Itoa(opts.Height),
+			"br="+strconv.Itoa(opts.BitrateKbps),
+		)
+		final = filepath.Join(dir, "final-"+resizeKey+".mp4")
+		if opts.NoCache || !exists(final) {
+			r := opts.newStageReporter(start, bounds, 4)
+			r.report(0)
+			editedDuration, _ := probeDuration(ffprobePath, edited)
+			if err := resizeVideo(ffmpegPath, edited, final, opts.Width, opts.Height, opts.BitrateKbps, editedDuration, r.report); err != nil {
+				return "", err
+			}
+		} else {
+			opts.logf("==> using cached resized result")
+		}
 	}
 	opts.logf("==> done (100%% overall)")
 

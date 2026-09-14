@@ -14,6 +14,8 @@ import {
   ImageIcon,
   Copy,
   Check,
+  Lock,
+  LockOpen,
 } from 'lucide-preact';
 import { api } from '../api.js';
 import { navigate, paths } from '../router.js';
@@ -307,31 +309,131 @@ function YouTubeLinkBox({ url }) {
   );
 }
 
+// EditParamsForm holds the auto-edit params (margin/speed) plus optional
+// resize/bitrate overrides. Resize and bitrate default to blank ("keep
+// original" — params.width/height/bitrateKbps of 0 tell the backend not
+// to re-encode for that reason at all), with the source video's actual
+// values shown as placeholders so "original" isn't a guess. Aspect ratio
+// is locked by default: editing one resize dimension recomputes the other
+// from the source's ratio; unlocking (the lock icon between the fields)
+// lets width/height be set independently.
 function EditParamsForm({ cell, onChanged }) {
-  const [margin, setMargin] = useState(cell.params?.margin || '0.2s');
-  const [speed, setSpeed] = useState(cell.params?.speed || 1.0);
+  const p = cell.params || {};
+  const [margin, setMargin] = useState(p.margin || '0.2s');
+  const [speed, setSpeed] = useState(p.speed || 1.0);
+  const [width, setWidth] = useState(p.width ? String(p.width) : '');
+  const [height, setHeight] = useState(p.height ? String(p.height) : '');
+  const [bitrate, setBitrate] = useState(p.bitrateKbps ? String(p.bitrateKbps) : '');
+  const [lockAspect, setLockAspect] = useState(p.lockAspect !== false);
+  const [sourceInfo, setSourceInfo] = useState(null);
   const disabled = cell.status !== 'idle';
 
-  const save = () => api.updateCell(cell.id, { params: { margin, speed: Number(speed) } }).then(onChanged);
+  useEffect(() => {
+    api.getCellSourceInfo(cell.id).then(setSourceInfo).catch(() => setSourceInfo(null));
+  }, [cell.id]);
+
+  const save = (overrides = {}) =>
+    api
+      .updateCell(cell.id, {
+        params: {
+          margin,
+          speed: Number(speed),
+          width: Number(width) || 0,
+          height: Number(height) || 0,
+          bitrateKbps: Number(bitrate) || 0,
+          lockAspect,
+          ...overrides,
+        },
+      })
+      .then(onChanged);
+
+  const onWidthChange = (v) => {
+    setWidth(v);
+    if (lockAspect && v && sourceInfo?.width && sourceInfo?.height) {
+      setHeight(String(Math.round((Number(v) * sourceInfo.height) / sourceInfo.width)));
+    }
+  };
+  const onHeightChange = (v) => {
+    setHeight(v);
+    if (lockAspect && v && sourceInfo?.width && sourceInfo?.height) {
+      setWidth(String(Math.round((Number(v) * sourceInfo.width) / sourceInfo.height)));
+    }
+  };
+  const toggleLock = () => {
+    const next = !lockAspect;
+    setLockAspect(next);
+    save({ lockAspect: next });
+  };
 
   return (
-    <div class="flex gap-4">
-      <div class="flex-1">
-        <label class="label">Margin</label>
-        <input class="input" value={margin} disabled={disabled} onInput={(e) => setMargin(e.currentTarget.value)} onBlur={save} />
+    <div class="space-y-3">
+      <div class="flex gap-4">
+        <div class="flex-1">
+          <label class="label">Margin</label>
+          <input class="input" value={margin} disabled={disabled} onInput={(e) => setMargin(e.currentTarget.value)} onBlur={() => save()} />
+        </div>
+        <div class="flex-1">
+          <label class="label">Speed</label>
+          <input
+            class="input"
+            type="number"
+            step="0.05"
+            min="0.5"
+            max="4"
+            value={speed}
+            disabled={disabled}
+            onInput={(e) => setSpeed(e.currentTarget.value)}
+            onBlur={() => save()}
+          />
+        </div>
       </div>
-      <div class="flex-1">
-        <label class="label">Speed</label>
+
+      <div>
+        <label class="label">Resize (blank = keep original)</label>
+        <div class="flex items-center gap-2">
+          <input
+            class="input flex-1"
+            type="number"
+            min="1"
+            placeholder={sourceInfo ? `${sourceInfo.width} (original)` : 'width'}
+            value={width}
+            disabled={disabled}
+            onInput={(e) => onWidthChange(e.currentTarget.value)}
+            onBlur={() => save()}
+          />
+          <button
+            type="button"
+            class="btn-secondary shrink-0"
+            disabled={disabled}
+            onClick={toggleLock}
+            title={lockAspect ? 'Aspect ratio locked — click to unlock' : 'Aspect ratio unlocked — click to lock'}
+          >
+            {lockAspect ? <Lock size={15} /> : <LockOpen size={15} />}
+          </button>
+          <input
+            class="input flex-1"
+            type="number"
+            min="1"
+            placeholder={sourceInfo ? `${sourceInfo.height} (original)` : 'height'}
+            value={height}
+            disabled={disabled}
+            onInput={(e) => onHeightChange(e.currentTarget.value)}
+            onBlur={() => save()}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label class="label">Bitrate, kbps (blank = keep original)</label>
         <input
           class="input"
           type="number"
-          step="0.05"
-          min="0.5"
-          max="4"
-          value={speed}
+          min="1"
+          placeholder={sourceInfo?.bitrateKbps ? `${sourceInfo.bitrateKbps} (original)` : 'original'}
+          value={bitrate}
           disabled={disabled}
-          onInput={(e) => setSpeed(e.currentTarget.value)}
-          onBlur={save}
+          onInput={(e) => setBitrate(e.currentTarget.value)}
+          onBlur={() => save()}
         />
       </div>
     </div>

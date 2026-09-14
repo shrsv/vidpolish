@@ -31,6 +31,63 @@ func probeDuration(ffprobePath, path string) (float64, error) {
 	return d, nil
 }
 
+// VideoInfo holds the properties of a video needed to show "original"
+// values in the edit UI and to decide whether a resize/bitrate pass is a
+// no-op.
+type VideoInfo struct {
+	Width       int `json:"width"`
+	Height      int `json:"height"`
+	BitrateKbps int `json:"bitrateKbps"` // 0 if ffprobe couldn't determine it (e.g. some containers omit stream bit_rate)
+}
+
+// ProbeVideoInfo reads width, height, and bitrate off a video's first
+// video stream via ffprobe. Bitrate falls back to the container-level
+// bit_rate (format.bit_rate) when the stream doesn't report its own, which
+// happens for some inputs.
+func ProbeVideoInfo(ffprobePath, path string) (VideoInfo, error) {
+	cmd := exec.Command(ffprobePath, "-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height,bit_rate:format=bit_rate",
+		"-of", "default=noprint_wrappers=1", path)
+	out, err := cmd.Output()
+	if err != nil {
+		return VideoInfo{}, fmt.Errorf("probing video info of %s: %w", path, err)
+	}
+
+	var info VideoInfo
+	var streamBitrate, formatBitrate int
+	bitRateSeen := 0
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		n, _ := strconv.Atoi(val)
+		switch key {
+		case "width":
+			info.Width = n
+		case "height":
+			info.Height = n
+		case "bit_rate":
+			// -show_entries lists the stream section before the format
+			// section, so the first bit_rate= line is the stream's own
+			// (may be "N/A" -> 0), the second is the format-level fallback.
+			bitRateSeen++
+			if bitRateSeen == 1 {
+				streamBitrate = n
+			} else {
+				formatBitrate = n
+			}
+		}
+	}
+	if streamBitrate > 0 {
+		info.BitrateKbps = streamBitrate / 1000
+	} else if formatBitrate > 0 {
+		info.BitrateKbps = formatBitrate / 1000
+	}
+	return info, nil
+}
+
 // stageReporter maps one pipeline stage's local progress (0..1) into the
 // overall job's progress and ETA, and emits it as a single formatted log
 // line — giving a live-moving percentage, a countdown for the whole job

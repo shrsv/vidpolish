@@ -154,11 +154,14 @@ func (s *Server) runEditCell(cell *store.Cell) error {
 	outDir := filepath.Join(dir, "cells", cell.ID)
 
 	out, err := pipeline.Process(pipeline.Options{
-		Input:     *source.OutputPath,
-		OutputDir: outDir,
-		Margin:    params.Margin,
-		Speed:     params.Speed,
-		Log:       s.log(cell.ID),
+		Input:       *source.OutputPath,
+		OutputDir:   outDir,
+		Margin:      params.Margin,
+		Speed:       params.Speed,
+		Width:       params.Width,
+		Height:      params.Height,
+		BitrateKbps: params.BitrateKbps,
+		Log:         s.log(cell.ID),
 	})
 	if err != nil {
 		return err

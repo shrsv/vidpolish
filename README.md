@@ -254,8 +254,15 @@ way:
 | --- | --- | --- |
 | `--margin` | `0.2s` | Padding kept around detected speech before a cut. Raise it (e.g. `0.3s`) if words feel clipped. |
 | `--speed` | `1.0` | Speed multiplier for kept/spoken segments only, between `0.5` and `4.0`. Silence stays fully cut. |
+| `--width` | original | Resize output to this width in pixels. Pair with `--height`, or leave it out to scale proportionally. |
+| `--height` | original | Resize output to this height in pixels. Pair with `--width`, or leave it out to scale proportionally. |
+| `--bitrate` | original | Target video bitrate in kbps. Leaving it unset keeps the original encode quality (no bitrate-driven re-encode). |
 | `--output-dir` | `output` | Directory the final file is written to. |
 | `--no-cache` | off | Ignore cached intermediate artifacts and recompute everything. |
+
+Leaving `--width`/`--height`/`--bitrate` unset skips the resize/re-encode pass
+entirely — the auto-edited output is used verbatim, at its original
+resolution and bitrate.
 
 ### Cache commands
 
@@ -468,9 +475,12 @@ an ordered list of **cells**:
 
 - **Source cell** (`#1`, always first): drag a video in, or use the file
   picker. Created automatically with the project.
-- **Edit cells**: denoise + cut at a chosen margin/speed, each its own
-  named, independently runnable cell (e.g. "1.25x draft", "slow calm
-  cut"). Add as many as you want at different speeds; they share the
+- **Edit cells**: denoise + cut at a chosen margin/speed, with optional
+  resize (aspect-locked by default; unlock to set width/height
+  independently) and bitrate overrides — left blank, both stay at the
+  source's original values. Each is its own named, independently runnable
+  cell (e.g. "1.25x draft", "slow calm cut"). Add as many as you want at
+  different speeds; they share the
   same underlying denoise/split work via the same cache
   `process` uses, so trying five speeds doesn't denoise five times, and
   running several at once is safe (the shared stage is serialized

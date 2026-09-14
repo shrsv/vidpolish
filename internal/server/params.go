@@ -4,6 +4,16 @@ package server
 type EditParams struct {
 	Margin string  `json:"margin"`
 	Speed  float64 `json:"speed"`
+
+	// Width/Height/BitrateKbps request a resize/re-encode pass; 0 (the
+	// default) keeps that dimension/the bitrate unchanged from the
+	// source. LockAspect is UI-only state (whether changing Width/Height
+	// should keep the other proportional) persisted here so it survives
+	// reopening the cell; it has no effect on the pipeline itself.
+	Width       int  `json:"width"`
+	Height      int  `json:"height"`
+	BitrateKbps int  `json:"bitrateKbps"`
+	LockAspect  bool `json:"lockAspect"`
 }
 
 // UploadParams is the params_json shape for an 'upload' cell.

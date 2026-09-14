@@ -121,6 +121,9 @@ func runProcess(args []string) {
 	outputDir := fs.String("output-dir", "output", "directory to write the final polished video to")
 	margin := fs.String("margin", "0.2s", "auto-editor margin around kept speech (e.g. 0.2s, 0.3s)")
 	speed := fs.Float64("speed", 1.0, "playback speed multiplier for kept/spoken segments (e.g. 1.25, 1.5, 1.75)")
+	width := fs.Int("width", 0, "resize output to this width in pixels (default: keep original); pair with --height or omit it to preserve aspect ratio")
+	height := fs.Int("height", 0, "resize output to this height in pixels (default: keep original); pair with --width or omit it to preserve aspect ratio")
+	bitrate := fs.Int("bitrate", 0, "target video bitrate in kbps (default: keep original quality, no re-encode for bitrate)")
 	noCache := fs.Bool("no-cache", false, "ignore cached intermediate artifacts and recompute everything")
 	upload := fs.Bool("upload", false, "upload the polished result to YouTube after processing")
 	title := fs.String("title", "", "YouTube title if --upload is set (default: input filename)")
@@ -141,13 +144,20 @@ func runProcess(args []string) {
 		fmt.Fprintln(os.Stderr, "error: --speed must be between 0.5 and 4.0")
 		os.Exit(1)
 	}
+	if *width < 0 || *height < 0 || *bitrate < 0 {
+		fmt.Fprintln(os.Stderr, "error: --width, --height, and --bitrate must not be negative")
+		os.Exit(1)
+	}
 
 	out, err := pipeline.Process(pipeline.Options{
-		Input:     fs.Arg(0),
-		OutputDir: *outputDir,
-		Margin:    *margin,
-		Speed:     *speed,
-		NoCache:   *noCache,
+		Input:       fs.Arg(0),
+		OutputDir:   *outputDir,
+		Margin:      *margin,
+		Speed:       *speed,
+		Width:       *width,
+		Height:      *height,
+		BitrateKbps: *bitrate,
+		NoCache:     *noCache,
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -380,6 +390,9 @@ func reorderFlags(args []string) []string {
 		"-output-dir": true, "--output-dir": true,
 		"-margin": true, "--margin": true,
 		"-speed": true, "--speed": true,
+		"-width": true, "--width": true,
+		"-height": true, "--height": true,
+		"-bitrate": true, "--bitrate": true,
 		"-title": true, "--title": true,
 		"-privacy": true, "--privacy": true,
 		"-language": true, "--language": true,

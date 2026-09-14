@@ -19,6 +19,7 @@ export const api = {
   createCell: (projectId, body) => request('POST', `/api/projects/${projectId}/cells`, body),
   updateCell: (id, body) => request('PATCH', `/api/cells/${id}`, body),
   getCell: (id) => request('GET', `/api/cells/${id}`),
+  getCellSourceInfo: (id) => request('GET', `/api/cells/${id}/source-info`),
   runCell: (id) => request('POST', `/api/cells/${id}/run`),
   deleteCell: (id) => request('DELETE', `/api/cells/${id}`),
   reorderCells: (projectId, kind, orderedCellIds) =>
