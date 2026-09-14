@@ -27,6 +27,7 @@
 | See what's done and what's planned | [Status and roadmap](#status-and-roadmap) |
 | Build from source or contribute | [Development](#development) |
 | Check the license | [License](#license) |
+| Find a related tool for code review | [See More](#see-more) |
 
 ## The Problem
 
@@ -702,3 +703,18 @@ go test ./...
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+## See More
+
+Your team's review attention is limited. Spend it where **business risk is
+highest**, not spread evenly across every diff.
+
+vidpolish automates cleanup on your *video*. [**LiveReview**](https://hexmos.com/livereview)
+does the analogous thing for your *code changes*: instead of reviewing
+every diff with equal effort, it scores each change by blast radius (how
+far its impact reaches through your call graph), so review attention goes
+where it actually matters.
+
+[![LiveReview: Blast-Radius Aware AI Code Review for Business-Critical Systems](media/livereview-banner.png)](https://hexmos.com/livereview)
