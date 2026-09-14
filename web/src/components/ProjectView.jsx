@@ -40,7 +40,8 @@ export function ProjectView({ projectId, initialCellSeq }) {
   const source = project.cells.find((c) => c.kind === 'source');
   const editCells = project.cells.filter((c) => c.kind === 'edit');
   const uploadCells = project.cells.filter((c) => c.kind === 'upload');
-  const allCollapsibleIds = [...editCells, ...uploadCells].map((c) => c.id);
+  const textCells = project.cells.filter((c) => c.kind === 'text');
+  const allCollapsibleIds = [...editCells, ...uploadCells, ...textCells].map((c) => c.id);
   const allCollapsed = allCollapsibleIds.length > 0 && allCollapsibleIds.every((id) => collapsed.has(id));
 
   const toggleCollapsed = (id) => {
@@ -59,6 +60,15 @@ export function ProjectView({ projectId, initialCellSeq }) {
       kind: 'edit',
       parentCellId: source.id,
       params: { margin: '0.2s', speed: 1.0 },
+    });
+    refresh();
+  };
+
+  const addText = async () => {
+    await api.createCell(projectId, {
+      kind: 'text',
+      parentCellId: source.id,
+      params: { markdown: '' },
     });
     refresh();
   };
@@ -114,6 +124,9 @@ export function ProjectView({ projectId, initialCellSeq }) {
         </button>
         <button class="text-slate-400 hover:text-cyan-400 transition-colors" onClick={() => scrollToSection('upload')}>
           Upload cells ({uploadCells.length})
+        </button>
+        <button class="text-slate-400 hover:text-cyan-400 transition-colors" onClick={() => scrollToSection('text')}>
+          Notes ({textCells.length})
         </button>
       </div>
 
@@ -194,6 +207,36 @@ export function ProjectView({ projectId, initialCellSeq }) {
                 No upload cells yet. Add one from a finished edit cell above once it's done.
               </p>
             )}
+          </div>
+
+          <div ref={(el) => (sectionRefs.current.text = el)} class="space-y-4">
+            <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wide">Notes</h2>
+            {textCells.map((c) => (
+              <DraggableCell
+                key={c.id}
+                cellRef={(el) => (cellRefs.current[c.seq] = el)}
+                dragging={dragState?.kind === 'text' && dragState.draggedId === c.id}
+                onDragStart={() => setDragState({ kind: 'text', draggedId: c.id })}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => onDrop('text', textCells, c.id)}
+              >
+                <Cell
+                  cell={c}
+                  editCells={editCells}
+                  project={project}
+                  collapsed={collapsed.has(c.id)}
+                  onToggleCollapse={() => toggleCollapsed(c.id)}
+                  onChanged={refresh}
+                  onDelete={refresh}
+                />
+              </DraggableCell>
+            ))}
+            {textCells.length === 0 && (
+              <p class="text-sm text-slate-500">No notes yet. Add one to keep links, timestamps, or ideas with this video.</p>
+            )}
+            <button class="btn-secondary" onClick={addText}>
+              <Plus size={15} /> Add note
+            </button>
           </div>
         </>
       )}

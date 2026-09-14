@@ -165,6 +165,13 @@ save-file-picker flow as the video download.
 
 <img src="media/screenshots/12-gif-export.png" width="100%">
 
+**Notes** — freeform markdown text cells for links, timestamps, and
+checklists on a project; type `@<seq>` to reference any other cell
+(source/edit/upload/text) as a clickable link, then Done switches back
+to the rendered view.
+
+<img src="media/screenshots/13-notes.png" width="100%">
+
 **Config panel** — YouTube credentials (secrets masked), upload defaults,
 and thumbnail styling, with automatic backups before every save.
 
@@ -518,6 +525,13 @@ an ordered list of **cells**:
   set title/description/tags/privacy per cell, and run it. Multiple
   upload cells can target the same or different edit cells and run
   concurrently.
+- **Text cells** ("Notes"): freeform markdown for links, timestamps, and
+  checklists about the video — headings, bold/italic, lists, and links
+  render straight away; an Edit button switches to the raw markdown, and
+  Done saves and switches back. Type `@<seq>` (e.g. `@2`) to reference
+  any other cell in the project — source, edit, upload, or another
+  note — as a clickable link; an "Insert reference" picker in edit mode
+  lists every cell so you don't need to remember its number.
 
 Every cell has a stable number (`#2`, `#3`, ...) assigned once and never
 reused, even if you reorder or delete other cells, plus an optional

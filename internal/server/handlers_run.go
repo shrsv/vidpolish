@@ -89,6 +89,10 @@ func (s *Server) handleRunCell(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("the source cell runs implicitly when a video is uploaded"))
 		return
 	}
+	if cell.Kind == store.KindText {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("text cells don't run"))
+		return
+	}
 	if !s.jobs.start(id) {
 		writeError(w, http.StatusConflict, fmt.Errorf("cell is already running"))
 		return

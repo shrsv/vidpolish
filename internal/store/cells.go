@@ -12,11 +12,14 @@ import (
 )
 
 // Cell kinds. Every project has exactly one 'source' cell (seq 1, created
-// alongside the project); 'edit' and 'upload' cells are added afterward.
+// alongside the project); 'edit', 'upload', and 'text' cells are added
+// afterward. 'text' cells hold freeform markdown notes/links about the
+// video and never run.
 const (
 	KindSource = "source"
 	KindEdit   = "edit"
 	KindUpload = "upload"
+	KindText   = "text"
 )
 
 // Cell statuses.
@@ -58,6 +61,8 @@ func DefaultName(kind string, seq int) string {
 		return "Edit #" + strconv.Itoa(seq)
 	case KindUpload:
 		return "Upload #" + strconv.Itoa(seq)
+	case KindText:
+		return "Note #" + strconv.Itoa(seq)
 	default:
 		return "Cell #" + strconv.Itoa(seq)
 	}

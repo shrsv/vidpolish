@@ -167,8 +167,8 @@ func (s *Server) handleCreateCell(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if req.Kind != store.KindEdit && req.Kind != store.KindUpload {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("kind must be 'edit' or 'upload'"))
+	if req.Kind != store.KindEdit && req.Kind != store.KindUpload && req.Kind != store.KindText {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("kind must be 'edit', 'upload', or 'text'"))
 		return
 	}
 	parent, err := s.resolveCellRef(projectID, req.ParentCellID)
@@ -182,6 +182,10 @@ func (s *Server) handleCreateCell(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Kind == store.KindUpload && parent.Kind != store.KindEdit {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("an upload cell's parent must be an edit cell"))
+		return
+	}
+	if req.Kind == store.KindText && parent.Kind != store.KindSource {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("a text cell's parent must be the project's source cell"))
 		return
 	}
 
@@ -290,8 +294,8 @@ func (s *Server) handleReorderCells(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if req.Kind != store.KindEdit && req.Kind != store.KindUpload {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("kind must be 'edit' or 'upload'"))
+	if req.Kind != store.KindEdit && req.Kind != store.KindUpload && req.Kind != store.KindText {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("kind must be 'edit', 'upload', or 'text'"))
 		return
 	}
 	if err := s.db.ReorderCells(projectID, req.Kind, req.OrderedCellIDs); err != nil {

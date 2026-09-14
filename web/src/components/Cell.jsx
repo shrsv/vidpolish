@@ -18,11 +18,13 @@ import {
   LockOpen,
   CircleQuestionMark,
   FileImage,
+  FileText,
 } from 'lucide-preact';
 import { api } from '../api.js';
 import { navigate, paths } from '../router.js';
 import { MediaInfoBadge, formatSize } from './MediaInfoBadge.jsx';
 import { sanitizeFilename, saveBlob } from '../download.js';
+import { renderMarkdown } from '../markdown.js';
 
 const STATUS_CLASS = {
   idle: 'badge-idle',
@@ -126,7 +128,7 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
               <span class="truncate">{cell.name}</span> <Pencil size={12} class="opacity-50 shrink-0" />
             </button>
           )}
-          <span class={STATUS_CLASS[cell.status]}>{cell.status}</span>
+          {cell.kind !== 'text' && <span class={STATUS_CLASS[cell.status]}>{cell.status}</span>}
           {parent && (
             <button
               class="text-xs text-slate-500 hover:text-cyan-400 flex items-center gap-1 transition-colors shrink-0"
@@ -140,10 +142,12 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
 
         {/* Cell toolbar: one disciplined place for every action. */}
         <div class="flex items-center gap-2 shrink-0">
-          <button class="btn-primary" disabled={cell.status === 'running'} onClick={run}>
-            {cell.status === 'running' ? <Loader2 size={15} class="animate-spin" /> : <Play size={15} />}
-            Run
-          </button>
+          {cell.kind !== 'text' && (
+            <button class="btn-primary" disabled={cell.status === 'running'} onClick={run}>
+              {cell.status === 'running' ? <Loader2 size={15} class="animate-spin" /> : <Play size={15} />}
+              Run
+            </button>
+          )}
           {cell.kind === 'edit' && cell.mediaUrl && (
             <button class="btn-secondary" onClick={download} title="Download">
               <Download size={15} />
@@ -160,6 +164,7 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
         <>
           {cell.kind === 'edit' && <EditParamsForm cell={cell} onChanged={onChanged} />}
           {cell.kind === 'upload' && <UploadParamsForm cell={cell} editCells={editCells} onChanged={onChanged} />}
+          {cell.kind === 'text' && <TextCellForm cell={cell} project={project} onChanged={onChanged} />}
 
           {cell.kind !== 'upload' && live && cell.status === 'running' && (
             <p class="text-xs text-cyan-400 font-mono">{live}</p>
@@ -652,6 +657,126 @@ function estimateOutputBytes({ baseInfo, width, height, bitrateKbps }) {
 
   const audioKbps = baseInfo.audioBitrateKbps || 160;
   return ((videoKbps + audioKbps) * 1000 * baseInfo.durationSec) / 8;
+}
+
+// TextCellForm is a markdown note: it always shows the rendered view once
+// there's content, with a single Edit button to go change it — no
+// separate preview tab, since flipping back and forth to check formatting
+// isn't the point here. Saving (via Done) returns straight to the
+// rendered view. While editing, "Insert reference" drops in an @<seq>
+// mention for any other cell in the project (source/edit/upload/text),
+// which renders as a link to that cell.
+function TextCellForm({ cell, project, onChanged }) {
+  const p = cell.params || {};
+  const [markdown, setMarkdown] = useState(p.markdown || '');
+  const [mode, setMode] = useState(p.markdown ? 'view' : 'edit');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const textareaRef = useRef(null);
+  const pickerRef = useRef(null);
+
+  useEffect(() => {
+    setMarkdown(p.markdown || '');
+    setMode(p.markdown ? 'view' : 'edit');
+  }, [cell.id]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onClickAway = (e) => {
+      if (!pickerRef.current?.contains(e.target)) setPickerOpen(false);
+    };
+    document.addEventListener('mousedown', onClickAway);
+    return () => document.removeEventListener('mousedown', onClickAway);
+  }, [pickerOpen]);
+
+  const save = () => {
+    if (markdown === (p.markdown || '')) return Promise.resolve();
+    return api.updateCell(cell.id, { params: { markdown } }).then(onChanged);
+  };
+  const finishEditing = async () => {
+    await save();
+    setMode('view');
+  };
+
+  const insertReference = (target) => {
+    const token = `@${target.seq}`;
+    const el = textareaRef.current;
+    const start = el?.selectionStart ?? markdown.length;
+    const end = el?.selectionEnd ?? markdown.length;
+    const next = markdown.slice(0, start) + token + ' ' + markdown.slice(end);
+    setMarkdown(next);
+    setPickerOpen(false);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.focus();
+      const pos = start + token.length + 1;
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  const otherCells = (project?.cells || []).filter((c) => c.id !== cell.id);
+
+  if (mode === 'view') {
+    return (
+      <div class="space-y-2">
+        <div class="flex justify-end">
+          <button type="button" class="btn-secondary" onClick={() => setMode('edit')}>
+            <Pencil size={13} /> Edit
+          </button>
+        </div>
+        {markdown ? (
+          <div
+            class="markdown-body rounded-md border border-slate-800 bg-slate-950 px-3 py-2"
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(markdown, project) }}
+          />
+        ) : (
+          <p class="text-xs text-slate-600 flex items-center gap-1.5">
+            <FileText size={13} /> Nothing here yet.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div class="space-y-2">
+      <div class="flex items-center gap-2">
+        <div class="relative" ref={pickerRef}>
+          <button type="button" class="btn-secondary" onClick={() => setPickerOpen((o) => !o)}>
+            <Link2 size={13} /> Insert reference
+          </button>
+          {pickerOpen && (
+            <div class="absolute top-full left-0 mt-1.5 w-64 max-h-56 overflow-y-auto rounded-md border border-slate-700 bg-slate-950 p-1 text-xs shadow-xl z-10">
+              {otherCells.length === 0 && <p class="px-2 py-1.5 text-slate-500">No other cells in this project yet.</p>}
+              {otherCells.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  class="w-full text-left px-2 py-1.5 rounded hover:bg-slate-800 flex items-center justify-between gap-2"
+                  onClick={() => insertReference(c)}
+                >
+                  <span class="truncate">{c.name}</span>
+                  <span class="text-slate-500 shrink-0">#{c.seq} · {c.kind}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button type="button" class="btn-primary ml-auto" onClick={finishEditing}>
+          <Check size={14} /> Done
+        </button>
+      </div>
+
+      <textarea
+        ref={textareaRef}
+        class="input font-mono text-xs min-h-[10rem] resize-y"
+        placeholder="Links, timestamps, notes... (markdown supported, @seq to reference a cell)"
+        value={markdown}
+        onInput={(e) => setMarkdown(e.currentTarget.value)}
+        onBlur={save}
+        autoFocus
+      />
+    </div>
+  );
 }
 
 function UploadParamsForm({ cell, editCells, onChanged }) {

@@ -16,6 +16,11 @@ type EditParams struct {
 	LockAspect  bool `json:"lockAspect"`
 }
 
+// TextParams is the params_json shape for a 'text' cell.
+type TextParams struct {
+	Markdown string `json:"markdown"`
+}
+
 // UploadParams is the params_json shape for an 'upload' cell.
 type UploadParams struct {
 	Title         string   `json:"title"`

@@ -50,3 +50,24 @@ button:disabled {
 .badge-running { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-cyan-900 text-cyan-300; }
 .badge-done { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-900 text-emerald-300; }
 .badge-error { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-red-900 text-red-300; }
+
+.markdown-body {
+  @apply text-sm text-slate-200 leading-relaxed;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  @apply font-semibold text-slate-100 mt-3 mb-1.5 first:mt-0;
+}
+.markdown-body h1 { @apply text-lg; }
+.markdown-body h2 { @apply text-base; }
+.markdown-body h3, .markdown-body h4, .markdown-body h5, .markdown-body h6 { @apply text-sm; }
+.markdown-body p { @apply my-1.5; }
+.markdown-body ul, .markdown-body ol { @apply my-1.5 pl-5 space-y-0.5; }
+.markdown-body ul { @apply list-disc; }
+.markdown-body ol { @apply list-decimal; }
+.markdown-body a { @apply text-cyan-400 hover:text-cyan-300 underline underline-offset-2; }
+.markdown-body a.cell-ref {
+  @apply inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-slate-800 text-cyan-300 no-underline hover:bg-slate-700;
+}
+.markdown-body code { @apply rounded bg-slate-800 px-1 py-0.5 text-[0.85em] text-cyan-300 font-mono; }
+.markdown-body strong { @apply font-semibold text-slate-100; }
