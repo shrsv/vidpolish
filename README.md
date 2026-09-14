@@ -69,39 +69,47 @@ command, without you touching a timeline editor.
 ## Screenshots
 
 A quick tour of the local UI (`vidpolish ui`) — the same "Projects"
-notebook model described in [Local UI](#local-ui) below.
+notebook model described in [Local UI](#local-ui) below. (The video
+preview in these shots is a generated color-bars/tone clip, not a real
+recording — same idea as an SMPTE test card, used here purely so the
+screenshots don't include anyone's actual footage.)
 
 <table>
-<tr><td width="50%">
+<tr><td width="33%">
 
 **Projects list** — every project you've started, one click to open.
 
 <img src="media/screenshots/01-projects-list.png" width="100%">
 
-</td><td width="50%">
-
-**A project's notebook view** — source cell, several edit-cell speed
-variants, and upload cells, all in one scrollable page with drag-to-reorder
-within each section.
-
-<img src="media/screenshots/02-project-view.png" width="100%">
-
-</td></tr>
-<tr><td width="50%">
+</td><td width="33%">
 
 **Category quick-nav + collapse-all** — jump between Source/Edit/Upload
 sections, or collapse every cell down to its header row.
 
 <img src="media/screenshots/05-project-header.png" width="100%">
 
-</td><td width="50%">
+</td><td width="34%">
+
+**Cache panel** — shows which project a cache entry belongs to, and makes
+clear that deleting an entry never deletes the project itself.
+
+<img src="media/screenshots/09-cache.png" width="100%">
+
+</td></tr>
+</table>
+
+**A project's notebook view** — source cell and edit cells in one
+scrollable page, with drag-to-reorder (from the grip handle) within each
+section.
+
+<img src="media/screenshots/02-project-view.png" width="100%">
 
 **Collapsed cells** — a compact overview of a project once you don't need
 every cell expanded.
 
 <img src="media/screenshots/06-collapsed-cells.png" width="100%">
 
-</td></tr>
+<table>
 <tr><td width="50%">
 
 **An edit cell at rest** — margin (with an inline explanation), speed
@@ -112,27 +120,10 @@ aspect-ratio lock), bitrate, and a live pre-run size estimate.
 
 </td><td width="50%">
 
-**A finished edit cell** — the resolved video, a compact media-info
-summary bottom-right of it, Download, and the new GIF export action, all
-next to "Add upload from this edit" as the primary next step.
+**Tool status** — the same checks as `vidpolish deps`, with a re-check
+button per tool.
 
-<img src="media/screenshots/10-edit-cell-done.png" width="100%">
-
-</td></tr>
-<tr><td width="50%">
-
-**Media info, expanded** — click the summary to see full resolution,
-duration, bitrate, frame rate and file size, plus a percent-change
-comparison against the source.
-
-<img src="media/screenshots/11-media-info-popover.png" width="100%">
-
-</td><td width="50%">
-
-**Export as GIF** — pick fps and width, saved through the same
-save-file-picker flow as the video download.
-
-<img src="media/screenshots/12-gif-export.png" width="100%">
+<img src="media/screenshots/08-tools.png" width="100%">
 
 </td></tr>
 <tr><td width="50%">
@@ -152,28 +143,32 @@ in a copyable box (with a dedicated Copy button) rather than a bare link.
 </td></tr>
 <tr><td width="50%">
 
-**Tool status** — the same checks as `vidpolish deps`, with a re-check
-button per tool.
+**A finished edit cell** — the resolved video, a compact media-info
+summary bottom-right of it, Download, and the new GIF export action, all
+next to "Add upload from this edit" as the primary next step.
 
-<img src="media/screenshots/08-tools.png" width="100%">
+<img src="media/screenshots/10-edit-cell-done.png" width="100%">
 
 </td><td width="50%">
+
+**Media info, expanded** — click the summary to see full resolution,
+duration, bitrate, frame rate and file size, plus a percent-change
+comparison against the source.
+
+<img src="media/screenshots/11-media-info-popover.png" width="100%">
+
+</td></tr>
+</table>
+
+**Export as GIF** — pick fps and width, saved through the same
+save-file-picker flow as the video download.
+
+<img src="media/screenshots/12-gif-export.png" width="100%">
 
 **Config panel** — YouTube credentials (secrets masked), upload defaults,
 and thumbnail styling, with automatic backups before every save.
 
 <img src="media/screenshots/07-config.png" width="100%">
-
-</td></tr>
-<tr><td width="50%">
-
-**Cache panel** — shows which project a cache entry belongs to, and makes
-clear that deleting an entry never deletes the project itself.
-
-<img src="media/screenshots/09-cache.png" width="100%">
-
-</td><td width="50%"></td></tr>
-</table>
 
 ## Prerequisites
 
