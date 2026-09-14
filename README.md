@@ -10,6 +10,60 @@
 
 ---
 
+## Contents
+
+| I want to... | Go to |
+| --- | --- |
+| Understand why vidpolish exists | [The Problem](#the-problem) |
+| Install it | [Install](#install) |
+| See the UI before installing anything | [Screenshots](#screenshots) |
+| See what the pipeline actually does | [What it does](#what-it-does) |
+| Check required tools before running it | [Prerequisites](#prerequisites) |
+| Run it from the command line | [Usage](#usage) |
+| Understand how caching avoids repeat work | [How caching works](#how-caching-works) |
+| Upload a finished video straight to YouTube | [YouTube upload](#youtube-upload) |
+| Use the local Projects web UI | [Local UI](#local-ui) |
+| Find my way around the source code | [Project layout](#project-layout) |
+| See what's done and what's planned | [Status and roadmap](#status-and-roadmap) |
+| Build from source or contribute | [Development](#development) |
+| Check the license | [License](#license) |
+
+## The Problem
+
+Recording a quick Loom-style walkthrough is easy. Cleaning it up by hand,
+trimming pauses, cutting background hiss, isn't. And a single "clean" pass
+is rarely the end of it: the cut you want for a fast internal update isn't
+the cut you want for a polished public upload, and figuring out the right
+speed/resolution/bitrate to hit a size or platform target usually means
+re-exporting and eyeballing file sizes over and over.
+
+vidpolish automates the cleanup — denoise, cut silence, one command — and
+gives you a local **Projects** workspace to manage everything downstream of
+that:
+
+- **One project per video**, holding every iteration you try on it, instead
+  of a folder full of `final_v3_REAL_final.mp4` files.
+- **As many edit iterations as you want** on the same source — each one its
+  own independently configurable pass over margin, speed, resize, and
+  bitrate — so "1.25x tight cut" and "1080p archival copy" can both exist
+  side by side, run whenever you want, without redoing the shared
+  denoise/split work each time.
+- **Real numbers before and after** — resolution, duration, bitrate, frame
+  rate, and file size, plus a percent-change comparison against the
+  source — so you can dial an iteration in to actually hit a size or
+  bitrate target instead of guessing and re-exporting.
+- **Upload any iteration straight to YouTube**, with a title/description/
+  tags/privacy per upload and an auto-generated cover thumbnail, so picking
+  "which cut goes out" is a one-click choice once you've made it, not a
+  re-export.
+- **Don't need YouTube for every iteration** — download any edit as an MP4,
+  or export it straight to an animated GIF (fps/width configurable), for
+  sharing a clip somewhere that isn't a video upload at all.
+- **Notes live next to the video, not in a separate doc** — markdown text
+  cells hold links, timestamps, and checklists on a project, with
+  `@<seq>` references linking straight to the exact source/edit/upload cell
+  you mean.
+
 ## Install
 
 ```sh
@@ -39,45 +93,23 @@ vidpolish ui
 Building from source (`make build`, or `go install`) still works as before
 if you'd rather not use the installer.
 
-## What it does
-
-vidpolish takes a raw talking-head or screen recording and runs it through a
-small pipeline:
-
-1. **Split** the input into a video-only stream and an audio-only track.
-2. **Denoise** the audio with [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet)
-   (the `deep-filter` CLI), the same kind of deep-learning noise removal
-   behind tools like Adobe Podcast.
-3. **Remux** the cleaned audio back onto the video.
-4. **Auto-cut** silence and dead air with [auto-editor](https://github.com/WyattBlue/auto-editor),
-   optionally speeding up the parts you kept.
-5. **Resize/re-encode** (optional) — only runs at all if you actually ask
-   for a different resolution or bitrate; left alone, the auto-cut output
-   is used as-is.
-
-Every stage shells out to a well-tested external binary instead of
-reinventing audio/video processing in Go: vidpolish is just the orchestrator
-gluing them together with sensible defaults, caching, and a simple CLI.
-
-## Why
-
-Recording a quick Loom-style walkthrough is easy. Cleaning it up by hand,
-trimming pauses, cutting background hiss, isn't. vidpolish automates that
-part so a five-minute rough recording turns into a tight, clean clip in one
-command, without you touching a timeline editor.
-
 ## Screenshots
 
 A quick tour of the local UI (`vidpolish ui`) — the same "Projects"
-notebook model described in [Local UI](#local-ui) below. (The video
-preview in these shots is a generated color-bars/tone clip, not a real
-recording — same idea as an SMPTE test card, used here purely so the
-screenshots don't include anyone's actual footage.)
+notebook model described in [Local UI](#local-ui) below: one project per
+video, as many edit iterations on it as you want, real before/after metrics
+to hit a size or platform target, and upload cells that push any iteration
+straight to YouTube with an auto-generated cover. (The video preview in
+these shots is a generated color-bars/tone clip, not a real recording —
+same idea as an SMPTE test card, used here purely so the screenshots don't
+include anyone's actual footage.)
 
 <table>
 <tr><td width="33%">
 
-**Projects list** — every project you've started, one click to open.
+**Projects list** — every video you're working on as its own project, so
+iterations on it live in one place instead of a folder full of
+`final_v3_REAL_final.mp4` files. One click to open.
 
 <img src="media/screenshots/01-projects-list.png" width="100%">
 
@@ -98,9 +130,11 @@ clear that deleting an entry never deletes the project itself.
 </td></tr>
 </table>
 
-**A project's notebook view** — source cell and edit cells in one
-scrollable page, with drag-to-reorder (from the grip handle) within each
-section.
+**A project's notebook view** — try as many edit iterations on the same
+source as you want (different speed, resize, or bitrate combos side by
+side), all in one scrollable page, with drag-to-reorder (from the grip
+handle) within each section. They share the same denoise/silence-cut work
+under the hood, so trying five variants doesn't mean five full re-runs.
 
 <img src="media/screenshots/02-project-view.png" width="100%">
 
@@ -112,9 +146,11 @@ every cell expanded.
 <table>
 <tr><td width="50%">
 
-**An edit cell at rest** — margin (with an inline explanation), speed
-presets, resize (exact pixels or a quick 25/50/75%/original scale, with an
-aspect-ratio lock), bitrate, and a live pre-run size estimate.
+**An edit cell at rest** — every knob for one iteration: denoise and
+silence-cut margin (with an inline explanation), speed presets, resize
+(exact pixels or a quick 25/50/75%/original scale, with an aspect-ratio
+lock), bitrate, and a live pre-run size estimate so you can aim an
+iteration at a target file size before you even run it.
 
 <img src="media/screenshots/03-edit-cell.png" width="100%">
 
@@ -128,15 +164,17 @@ button per tool.
 </td></tr>
 <tr><td width="50%">
 
-**Live thumbnail preview** — the auto-generated YouTube thumbnail updates
-as you type the title, before you've even run the upload.
+**Live thumbnail preview** — every upload cell gets a nice auto-generated
+cover thumbnail for free; it updates live as you type the title, before
+you've even run the upload.
 
 <img src="media/screenshots/04-upload-cell-live-preview.png" width="100%">
 
 </td><td width="50%">
 
-**A finished upload** — the YouTube link appears as soon as it's known,
-in a copyable box (with a dedicated Copy button) rather than a bare link.
+**A finished upload** — any edit iteration can be the source for an upload
+cell; the YouTube link appears as soon as it's known, in a copyable box
+(with a dedicated Copy button) rather than a bare link.
 
 <img src="media/screenshots/04-upload-cell-done.png" width="100%">
 
@@ -151,9 +189,11 @@ next to "Add upload from this edit" as the primary next step.
 
 </td><td width="50%">
 
-**Media info, expanded** — click the summary to see full resolution,
-duration, bitrate, frame rate and file size, plus a percent-change
-comparison against the source.
+**Media info, expanded** — the real numbers for hitting a distribution
+target: click the summary for full resolution, duration, bitrate, frame
+rate, and file size, plus a percent-change comparison against the source
+so you can see exactly how much smaller (or faster, or smaller-resolution)
+this iteration is.
 
 <img src="media/screenshots/11-media-info-popover.png" width="100%">
 
@@ -176,6 +216,26 @@ to the rendered view.
 and thumbnail styling, with automatic backups before every save.
 
 <img src="media/screenshots/07-config.png" width="100%">
+
+## What it does
+
+vidpolish takes a raw talking-head or screen recording and runs it through a
+small pipeline:
+
+1. **Split** the input into a video-only stream and an audio-only track.
+2. **Denoise** the audio with [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet)
+   (the `deep-filter` CLI), the same kind of deep-learning noise removal
+   behind tools like Adobe Podcast.
+3. **Remux** the cleaned audio back onto the video.
+4. **Auto-cut** silence and dead air with [auto-editor](https://github.com/WyattBlue/auto-editor),
+   optionally speeding up the parts you kept.
+5. **Resize/re-encode** (optional) — only runs at all if you actually ask
+   for a different resolution or bitrate; left alone, the auto-cut output
+   is used as-is.
+
+Every stage shells out to a well-tested external binary instead of
+reinventing audio/video processing in Go: vidpolish is just the orchestrator
+gluing them together with sensible defaults, caching, and a simple CLI.
 
 ## Prerequisites
 
