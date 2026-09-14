@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { Plus, ChevronRight, Trash2, Database } from 'lucide-preact';
 import { api } from '../api.js';
 import { navigate, paths } from '../router.js';
+import { timeAgo, fullTimestamp } from '../time.js';
 
 export function ProjectList() {
   const [projects, setProjects] = useState([]);
@@ -62,8 +63,14 @@ export function ProjectList() {
             >
               <div>
                 <div class="font-medium">{p.name}</div>
-                <div class="text-xs text-slate-500">
-                  {p.cells.length} cell{p.cells.length === 1 ? '' : 's'}
+                <div class="text-xs text-slate-500 flex items-center gap-1.5">
+                  <span>{p.cells.length} cell{p.cells.length === 1 ? '' : 's'}</span>
+                  <span>·</span>
+                  <span
+                    title={`Created ${fullTimestamp(p.createdAt)}\nUpdated ${fullTimestamp(p.updatedAt)}`}
+                  >
+                    Updated {timeAgo(p.updatedAt)}
+                  </span>
                 </div>
               </div>
               <div class="flex items-center gap-3">

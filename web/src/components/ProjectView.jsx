@@ -5,6 +5,7 @@ import { SourceDropzone } from './SourceDropzone.jsx';
 import { Cell } from './Cell.jsx';
 import { MediaInfoBadge } from './MediaInfoBadge.jsx';
 import { useDocumentTitle } from '../router.js';
+import { timeAgo, fullTimestamp } from '../time.js';
 
 export function ProjectView({ projectId, initialCellSeq }) {
   const [project, setProject] = useState(null);
@@ -107,7 +108,15 @@ export function ProjectView({ projectId, initialCellSeq }) {
   return (
     <div class="space-y-6">
       <div class="flex items-center justify-between">
-        <h1 class="text-lg font-semibold">{project.name}</h1>
+        <div>
+          <h1 class="text-lg font-semibold">{project.name}</h1>
+          <p
+            class="text-xs text-slate-500"
+            title={`Created ${fullTimestamp(project.createdAt)}\nUpdated ${fullTimestamp(project.updatedAt)}`}
+          >
+            Created {timeAgo(project.createdAt)} · updated {timeAgo(project.updatedAt)}
+          </p>
+        </div>
         <button class="btn-secondary" onClick={collapseAll}>
           {allCollapsed ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />}
           {allCollapsed ? 'Expand all' : 'Collapse all'}
@@ -138,6 +147,12 @@ export function ProjectView({ projectId, initialCellSeq }) {
               <span class="text-xs font-mono text-slate-500">#{source.seq}</span>
               <span class="font-medium">{source.name}</span>
               <span class="text-xs text-slate-500">{source.sourceFilename}</span>
+              <span
+                class="text-xs text-slate-600"
+                title={`Created ${fullTimestamp(source.createdAt)}\nUpdated ${fullTimestamp(source.updatedAt)}`}
+              >
+                updated {timeAgo(source.updatedAt)}
+              </span>
             </div>
             <video controls src={source.mediaUrl} class="w-full rounded-md max-h-80" />
             <MediaInfoBadge cellId={source.id} status={source.status} />

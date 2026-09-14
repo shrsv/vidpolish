@@ -31,16 +31,20 @@ type cellResponse struct {
 	SourceFilename string `json:"sourceFilename,omitempty"`
 	YouTubeURL     string `json:"youtubeUrl,omitempty"`
 	Position       int    `json:"position"`
+	CreatedAt      int64  `json:"createdAt"`
+	UpdatedAt      int64  `json:"updatedAt"`
 }
 
 func cellToResponse(c *store.Cell) *cellResponse {
 	r := &cellResponse{
-		ID:       c.ID,
-		Seq:      c.Seq,
-		Name:     c.DisplayName(),
-		Kind:     c.Kind,
-		Status:   c.Status,
-		Position: c.Position,
+		ID:        c.ID,
+		Seq:       c.Seq,
+		Name:      c.DisplayName(),
+		Kind:      c.Kind,
+		Status:    c.Status,
+		Position:  c.Position,
+		CreatedAt: c.CreatedAt.Unix(),
+		UpdatedAt: c.UpdatedAt.Unix(),
 	}
 	if c.ParentCellID != nil {
 		r.ParentCellID = *c.ParentCellID

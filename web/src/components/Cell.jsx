@@ -25,6 +25,7 @@ import { navigate, paths } from '../router.js';
 import { MediaInfoBadge, formatSize } from './MediaInfoBadge.jsx';
 import { sanitizeFilename, saveBlob } from '../download.js';
 import { renderMarkdown } from '../markdown.js';
+import { timeAgo, fullTimestamp } from '../time.js';
 
 const STATUS_CLASS = {
   idle: 'badge-idle',
@@ -138,6 +139,12 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
               <Link2 size={12} /> based on #{parent.seq}
             </button>
           )}
+          <span
+            class="text-xs text-slate-600 shrink-0"
+            title={`Created ${fullTimestamp(cell.createdAt)}\nUpdated ${fullTimestamp(cell.updatedAt)}`}
+          >
+            updated {timeAgo(cell.updatedAt)}
+          </span>
         </div>
 
         {/* Cell toolbar: one disciplined place for every action. */}
