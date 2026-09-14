@@ -51,6 +51,9 @@ small pipeline:
 3. **Remux** the cleaned audio back onto the video.
 4. **Auto-cut** silence and dead air with [auto-editor](https://github.com/WyattBlue/auto-editor),
    optionally speeding up the parts you kept.
+5. **Resize/re-encode** (optional) — only runs at all if you actually ask
+   for a different resolution or bitrate; left alone, the auto-cut output
+   is used as-is.
 
 Every stage shells out to a well-tested external binary instead of
 reinventing audio/video processing in Go: vidpolish is just the orchestrator
@@ -101,49 +104,75 @@ every cell expanded.
 </td></tr>
 <tr><td width="50%">
 
-**An edit cell** — margin/speed controls, a live video preview once it's
-run, Download, and "Add upload from this edit" as the primary next step.
+**An edit cell at rest** — margin (with an inline explanation), speed
+presets, resize (exact pixels or a quick 25/50/75%/original scale, with an
+aspect-ratio lock), bitrate, and a live pre-run size estimate.
 
 <img src="media/screenshots/03-edit-cell.png" width="100%">
 
 </td><td width="50%">
+
+**A finished edit cell** — the resolved video, a compact media-info
+summary bottom-right of it, Download, and the new GIF export action, all
+next to "Add upload from this edit" as the primary next step.
+
+<img src="media/screenshots/10-edit-cell-done.png" width="100%">
+
+</td></tr>
+<tr><td width="50%">
+
+**Media info, expanded** — click the summary to see full resolution,
+duration, bitrate, frame rate and file size, plus a percent-change
+comparison against the source.
+
+<img src="media/screenshots/11-media-info-popover.png" width="100%">
+
+</td><td width="50%">
+
+**Export as GIF** — pick fps and width, saved through the same
+save-file-picker flow as the video download.
+
+<img src="media/screenshots/12-gif-export.png" width="100%">
+
+</td></tr>
+<tr><td width="50%">
 
 **Live thumbnail preview** — the auto-generated YouTube thumbnail updates
 as you type the title, before you've even run the upload.
 
 <img src="media/screenshots/04-upload-cell-live-preview.png" width="100%">
 
-</td></tr>
-<tr><td width="50%">
+</td><td width="50%">
 
 **A finished upload** — the YouTube link appears as soon as it's known,
 in a copyable box (with a dedicated Copy button) rather than a bare link.
 
 <img src="media/screenshots/04-upload-cell-done.png" width="100%">
 
-</td><td width="50%">
+</td></tr>
+<tr><td width="50%">
 
 **Tool status** — the same checks as `vidpolish deps`, with a re-check
 button per tool.
 
 <img src="media/screenshots/08-tools.png" width="100%">
 
-</td></tr>
-<tr><td width="50%">
+</td><td width="50%">
 
 **Config panel** — YouTube credentials (secrets masked), upload defaults,
 and thumbnail styling, with automatic backups before every save.
 
 <img src="media/screenshots/07-config.png" width="100%">
 
-</td><td width="50%">
+</td></tr>
+<tr><td width="50%">
 
 **Cache panel** — shows which project a cache entry belongs to, and makes
 clear that deleting an entry never deletes the project itself.
 
 <img src="media/screenshots/09-cache.png" width="100%">
 
-</td></tr>
+</td><td width="50%"></td></tr>
 </table>
 
 ## Prerequisites
@@ -475,16 +504,21 @@ an ordered list of **cells**:
 
 - **Source cell** (`#1`, always first): drag a video in, or use the file
   picker. Created automatically with the project.
-- **Edit cells**: denoise + cut at a chosen margin/speed, with optional
-  resize (aspect-locked by default; unlock to set width/height
-  independently) and bitrate overrides — left blank, both stay at the
-  source's original values. Each is its own named, independently runnable
-  cell (e.g. "1.25x draft", "slow calm cut"). Add as many as you want at
-  different speeds; they share the
-  same underlying denoise/split work via the same cache
-  `process` uses, so trying five speeds doesn't denoise five times, and
-  running several at once is safe (the shared stage is serialized
-  per-source internally, the fast parts run in parallel).
+- **Edit cells**: denoise + cut at a chosen margin (with an inline
+  explanation of what it does) and speed (1x/1.25x/1.5x/1.75x/2x presets,
+  or type your own), with optional resize — exact pixels, or a quick
+  25/50/75%/original scale, aspect-locked by default — and bitrate
+  overrides; left blank, everything stays at the source's original
+  values, and a rough size estimate updates live as you change them. Each
+  is its own named, independently runnable cell (e.g. "1.25x draft", "slow
+  calm cut"). Add as many as you want at different speeds; they share the
+  same underlying denoise/split work via the same cache `process` uses,
+  so trying five speeds doesn't denoise five times, and running several
+  at once is safe (the shared stage is serialized per-source internally,
+  the fast parts run in parallel). Once a cell has run, a compact
+  resolution/duration/bitrate/size summary sits under the video (click for
+  the full breakdown plus a vs.-source comparison), and you can Download
+  the result or export it as a GIF (fps/width configurable) alongside it.
 - **Upload cells**: pick which edit cell's output to push to YouTube,
   set title/description/tags/privacy per cell, and run it. Multiple
   upload cells can target the same or different edit cells and run
