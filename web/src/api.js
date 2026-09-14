@@ -71,6 +71,19 @@ export const api = {
     return res.blob();
   },
 
+  exportGif: async (cellId, { fps, width } = {}) => {
+    const res = await fetch(`/api/cells/${cellId}/export-gif`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fps, width }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || res.statusText);
+    }
+    return res.blob();
+  },
+
   getConfig: () => request('GET', '/api/config'),
   putConfig: (body) => request('PUT', '/api/config', body),
   listConfigBackups: () => request('GET', '/api/config/backups'),

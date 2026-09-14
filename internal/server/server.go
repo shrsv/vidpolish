@@ -54,6 +54,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/cells/{id}/run", s.handleRunCell)
 	s.mux.HandleFunc("GET /api/cells/{id}", s.handleGetCell)
 	s.mux.HandleFunc("GET /api/cells/{id}/info", s.handleCellInfo)
+	s.mux.HandleFunc("POST /api/cells/{id}/export-gif", s.handleExportGif)
 	s.mux.HandleFunc("GET /api/cells/{id}/events", s.handleCellEvents)
 	s.mux.HandleFunc("DELETE /api/cells/{id}", s.handleDeleteCell)
 

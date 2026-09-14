@@ -16,10 +16,13 @@ import {
   Check,
   Lock,
   LockOpen,
+  CircleQuestionMark,
+  FileImage,
 } from 'lucide-preact';
 import { api } from '../api.js';
 import { navigate, paths } from '../router.js';
 import { MediaInfoBadge, formatSize } from './MediaInfoBadge.jsx';
+import { sanitizeFilename, saveBlob } from '../download.js';
 
 const STATUS_CLASS = {
   idle: 'badge-idle',
@@ -61,7 +64,7 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
     if (confirm(`Delete "${cell.name}"?`)) api.deleteCell(cell.id).then(onDelete);
   };
   const download = async () => {
-    const suggestedName = `${cell.name.replace(/\s+/g, '-')}.mp4`;
+    const suggestedName = `${sanitizeFilename(cell.name)}.mp4`;
     // Prefer a real OS save-file dialog (Chromium's File System Access
     // API) so people can pick where the file goes, instead of it silently
     // landing in the browser's default Downloads folder.
@@ -146,6 +149,7 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
               <Download size={15} />
             </button>
           )}
+          {cell.kind === 'edit' && cell.mediaUrl && <GifExportButton cell={cell} />}
           <button class="btn-danger" onClick={remove} title="Delete">
             <Trash2 size={15} />
           </button>
@@ -311,6 +315,74 @@ function YouTubeLinkBox({ url }) {
   );
 }
 
+// GifExportButton toggles a small popover for exporting an edit cell's
+// output as an animated GIF, with fps/width customization (both optional
+// — blank width keeps the source's own width). The conversion happens
+// server-side on click and streams straight back as a blob to save,
+// rather than being persisted anywhere.
+function GifExportButton({ cell }) {
+  const [open, setOpen] = useState(false);
+  const [fps, setFps] = useState(12);
+  const [width, setWidth] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickAway = (e) => {
+      if (!boxRef.current?.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClickAway);
+    return () => document.removeEventListener('mousedown', onClickAway);
+  }, [open]);
+
+  const exportGif = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const blob = await api.exportGif(cell.id, { fps: Number(fps) || 12, width: Number(width) || 0 });
+      await saveBlob(blob, `${sanitizeFilename(cell.name)}.gif`, {
+        description: 'GIF image',
+        accept: { 'image/gif': ['.gif'] },
+      });
+      setOpen(false);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div class="relative" ref={boxRef}>
+      <button type="button" class="btn-secondary" onClick={() => setOpen((o) => !o)} title="Export as GIF">
+        <FileImage size={15} />
+      </button>
+      {open && (
+        <div class="absolute top-full right-0 mt-1.5 w-56 rounded-md border border-slate-700 bg-slate-950 p-3 text-xs shadow-xl z-10 space-y-2">
+          <p class="text-slate-400 font-medium">Export as GIF</p>
+          <div class="flex gap-2">
+            <div class="flex-1">
+              <label class="label">FPS</label>
+              <input class="input py-1" type="number" min="1" max="30" value={fps} onInput={(e) => setFps(e.currentTarget.value)} />
+            </div>
+            <div class="flex-1">
+              <label class="label">Width</label>
+              <input class="input py-1" type="number" min="1" placeholder="original" value={width} onInput={(e) => setWidth(e.currentTarget.value)} />
+            </div>
+          </div>
+          {error && <p class="text-red-400">{error}</p>}
+          <button type="button" class="btn-primary w-full justify-center" disabled={busy} onClick={exportGif}>
+            {busy ? <Loader2 size={14} class="animate-spin" /> : <FileImage size={14} />}
+            {busy ? 'Rendering...' : 'Download GIF'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // EditParamsForm holds the auto-edit params (margin/speed) plus optional
 // resize/bitrate overrides. Resize and bitrate default to blank ("keep
 // original" — params.width/height/bitrateKbps of 0 tell the backend not
@@ -328,6 +400,7 @@ function EditParamsForm({ cell, onChanged }) {
   const [bitrate, setBitrate] = useState(p.bitrateKbps ? String(p.bitrateKbps) : '');
   const [lockAspect, setLockAspect] = useState(p.lockAspect !== false);
   const [info, setInfo] = useState(null);
+  const [showMarginHelp, setShowMarginHelp] = useState(false);
   const disabled = cell.status !== 'idle';
   const sourceInfo = info?.source;
   // Prefer this cell's own last output as the size-estimate baseline: it
@@ -373,6 +446,24 @@ function EditParamsForm({ cell, onChanged }) {
     save({ lockAspect: next });
   };
 
+  // applyScale sets width/height to pct% of the source's own resolution
+  // (100% clears the override back to "keep original") — a quicker path
+  // than typing exact pixel dimensions.
+  const applyScale = (pct) => {
+    if (!sourceInfo?.width || !sourceInfo?.height || !pct) return;
+    if (pct >= 100) {
+      setWidth('');
+      setHeight('');
+      save({ width: 0, height: 0 });
+      return;
+    }
+    const w = Math.round((sourceInfo.width * pct) / 100);
+    const h = Math.round((sourceInfo.height * pct) / 100);
+    setWidth(String(w));
+    setHeight(String(h));
+    save({ width: w, height: h });
+  };
+
   const estimatedBytes = estimateOutputBytes({
     baseInfo,
     width: Number(width) || 0,
@@ -384,8 +475,26 @@ function EditParamsForm({ cell, onChanged }) {
     <div class="space-y-3">
       <div class="flex gap-4">
         <div class="flex-1">
-          <label class="label">Margin</label>
+          <label class="label flex items-center gap-1">
+            Margin
+            <button
+              type="button"
+              class="text-slate-500 hover:text-cyan-400 transition-colors"
+              onClick={() => setShowMarginHelp((s) => !s)}
+              title="What does margin do?"
+            >
+              <CircleQuestionMark size={12} />
+            </button>
+          </label>
           <input class="input" value={margin} disabled={disabled} onInput={(e) => setMargin(e.currentTarget.value)} onBlur={() => save()} />
+          {showMarginHelp && (
+            <p class="text-[11px] text-slate-500 mt-1 leading-snug">
+              How much extra time to keep on either side of detected speech before cutting, so words
+              don't get clipped at the start/end of a cut. <code class="text-slate-400">0.2s</code>{' '}
+              (default) is a light trim; raise it (e.g. <code class="text-slate-400">0.3s</code>–
+              <code class="text-slate-400">0.5s</code>) if cuts feel abrupt, lower it for a tighter edit.
+            </p>
+          )}
         </div>
         <div class="flex-1">
           <label class="label">Speed</label>
@@ -400,6 +509,26 @@ function EditParamsForm({ cell, onChanged }) {
             onInput={(e) => setSpeed(e.currentTarget.value)}
             onBlur={() => save()}
           />
+          <div class="flex items-center gap-1 mt-1.5">
+            {[1, 1.25, 1.5, 1.75, 2].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                class={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  Number(speed) === preset
+                    ? 'border-cyan-600 bg-cyan-950 text-cyan-300'
+                    : 'border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-700'
+                }`}
+                disabled={disabled}
+                onClick={() => {
+                  setSpeed(preset);
+                  save({ speed: preset });
+                }}
+              >
+                {preset}x
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -418,8 +547,13 @@ function EditParamsForm({ cell, onChanged }) {
           />
           <button
             type="button"
-            class="btn-secondary shrink-0"
+            class={`shrink-0 inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              lockAspect
+                ? 'bg-cyan-600 border-cyan-600 hover:bg-cyan-500 text-white'
+                : 'bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-500'
+            }`}
             disabled={disabled}
+            aria-pressed={lockAspect}
             onClick={toggleLock}
             title={lockAspect ? 'Aspect ratio locked — click to unlock' : 'Aspect ratio unlocked — click to lock'}
           >
@@ -434,6 +568,35 @@ function EditParamsForm({ cell, onChanged }) {
             disabled={disabled}
             onInput={(e) => onHeightChange(e.currentTarget.value)}
             onBlur={() => save()}
+          />
+        </div>
+        <div class="flex items-center gap-1.5 mt-1.5">
+          <span class="text-[11px] text-slate-500 mr-0.5">Scale:</span>
+          {[25, 50, 75, 100].map((pct) => (
+            <button
+              key={pct}
+              type="button"
+              class="text-[11px] px-2 py-0.5 rounded border border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={disabled || !sourceInfo}
+              onClick={() => applyScale(pct)}
+              title={pct === 100 ? 'Reset to original resolution' : `Scale to ${pct}% of original`}
+            >
+              {pct === 100 ? 'Original' : `${pct}%`}
+            </button>
+          ))}
+          <input
+            class="input py-0.5 text-[11px] w-16"
+            type="number"
+            min="1"
+            max="100"
+            placeholder="%"
+            disabled={disabled || !sourceInfo}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              applyScale(Number(e.currentTarget.value));
+              e.currentTarget.value = '';
+            }}
+            title="Custom scale % of original — press Enter to apply"
           />
         </div>
       </div>

@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { SourceDropzone } from './SourceDropzone.jsx';
 import { Cell } from './Cell.jsx';
 import { MediaInfoBadge } from './MediaInfoBadge.jsx';
+import { useDocumentTitle } from '../router.js';
 
 export function ProjectView({ projectId, initialCellSeq }) {
   const [project, setProject] = useState(null);
@@ -29,6 +30,9 @@ export function ProjectView({ projectId, initialCellSeq }) {
     const t = setTimeout(() => el.classList.remove('ring-2', 'ring-cyan-500'), 1600);
     return () => clearTimeout(t);
   }, [initialCellSeq, project]);
+
+  const deepLinkedCell = project && initialCellSeq ? project.cells.find((c) => c.seq === initialCellSeq) : null;
+  useDocumentTitle(project && (deepLinkedCell ? `${deepLinkedCell.name} · ${project.name}` : project.name));
 
   if (error) return <p class="text-sm text-red-400">{error}</p>;
   if (!project) return <p class="text-sm text-slate-500">Loading...</p>;
@@ -208,18 +212,35 @@ function reorderLocal(cells, kind, orderedIds) {
   return [...others, ...reordered].sort((a, b) => a.position - b.position);
 }
 
+// DraggableCell only lets a drag start from the grip handle, not anywhere
+// in the cell body: `draggable` has to live on this wrapping div for HTML5
+// drag-and-drop to work at all, but leaving it permanently true made the
+// *entire* cell draggable — every input, button, and bit of selectable
+// text inside it — since a browser treats any press-and-move gesture
+// inside a draggable ancestor as a drag rather than a click/selection.
+// Instead, `draggable` only flips on while the pointer is held down on the
+// handle itself (set before the drag actually starts, which HTML5 DnD
+// allows), and back off once the drag ends — so everywhere else in the
+// cell behaves like normal, selectable, clickable content.
 function DraggableCell({ children, cellRef, dragging, onDragStart, onDragOver, onDrop }) {
+  const [canDrag, setCanDrag] = useState(false);
   return (
     <div
       ref={cellRef}
-      draggable
+      draggable={canDrag}
       onDragStart={onDragStart}
+      onDragEnd={() => setCanDrag(false)}
       onDragOver={onDragOver}
       onDrop={onDrop}
       class={`transition-opacity ${dragging ? 'opacity-40' : ''}`}
     >
       <div class="flex items-start gap-1">
-        <span class="mt-4 cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400" title="Drag to reorder">
+        <span
+          class="mt-4 cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400"
+          title="Drag to reorder"
+          onMouseDown={() => setCanDrag(true)}
+          onMouseUp={() => setCanDrag(false)}
+        >
           <GripVertical size={16} />
         </span>
         <div class="flex-1 min-w-0">{children}</div>

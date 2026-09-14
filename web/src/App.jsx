@@ -4,7 +4,7 @@ import { ProjectView } from './components/ProjectView.jsx';
 import { ConfigPanel } from './components/ConfigPanel.jsx';
 import { ToolsPanel } from './components/ToolsPanel.jsx';
 import { CachePanel } from './components/CachePanel.jsx';
-import { useHashRoute, navigate, paths } from './router.js';
+import { useHashRoute, navigate, paths, useDocumentTitle } from './router.js';
 
 const TABS = [
   { id: 'projects', label: 'Projects', icon: Film, path: paths.home() },
@@ -13,9 +13,20 @@ const TABS = [
   { id: 'cache', label: 'Cache', icon: Database, path: paths.cache() },
 ];
 
+// Titles for every page except 'project', which sets its own (it needs
+// the project — and possibly a deep-linked cell's — name, fetched inside
+// ProjectView) once that data is in.
+const PAGE_TITLES = {
+  projects: 'Projects',
+  config: 'Config',
+  tools: 'Tools',
+  cache: 'Cache',
+};
+
 export function App() {
   const route = useHashRoute();
   const activePage = route.page === 'project' ? 'projects' : route.page;
+  useDocumentTitle(route.page === 'project' ? undefined : PAGE_TITLES[route.page]);
 
   return (
     <div class="min-h-screen flex flex-col">

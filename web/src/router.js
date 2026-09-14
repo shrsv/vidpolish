@@ -48,6 +48,19 @@ export function navigate(path) {
   location.hash = path;
 }
 
+// useDocumentTitle sets the browser tab title, appending the app name so
+// every page still reads as "part of vidpolish" while telling tabs apart
+// at a glance once several are open. Pass null/undefined to leave the tab
+// title untouched — e.g. a page whose own title depends on data it's
+// still fetching (ProjectView) passes nothing until that data is in,
+// rather than clobbering whatever title another component already set.
+export function useDocumentTitle(title) {
+  useEffect(() => {
+    if (!title) return;
+    document.title = `${title} · vidpolish`;
+  }, [title]);
+}
+
 export const paths = {
   home: () => '#/',
   project: (id) => `#/projects/${id}`,
