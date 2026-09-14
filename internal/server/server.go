@@ -53,7 +53,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /api/cells/{id}", s.handleUpdateCell)
 	s.mux.HandleFunc("POST /api/cells/{id}/run", s.handleRunCell)
 	s.mux.HandleFunc("GET /api/cells/{id}", s.handleGetCell)
-	s.mux.HandleFunc("GET /api/cells/{id}/source-info", s.handleCellSourceInfo)
+	s.mux.HandleFunc("GET /api/cells/{id}/info", s.handleCellInfo)
 	s.mux.HandleFunc("GET /api/cells/{id}/events", s.handleCellEvents)
 	s.mux.HandleFunc("DELETE /api/cells/{id}", s.handleDeleteCell)
 

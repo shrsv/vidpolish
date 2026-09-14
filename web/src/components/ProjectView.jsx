@@ -3,6 +3,7 @@ import { Plus, ChevronsDownUp, ChevronsUpDown, GripVertical } from 'lucide-preac
 import { api } from '../api.js';
 import { SourceDropzone } from './SourceDropzone.jsx';
 import { Cell } from './Cell.jsx';
+import { MediaInfoBadge } from './MediaInfoBadge.jsx';
 
 export function ProjectView({ projectId, initialCellSeq }) {
   const [project, setProject] = useState(null);
@@ -122,6 +123,7 @@ export function ProjectView({ projectId, initialCellSeq }) {
               <span class="text-xs text-slate-500">{source.sourceFilename}</span>
             </div>
             <video controls src={source.mediaUrl} class="w-full rounded-md max-h-80" />
+            <MediaInfoBadge cellId={source.id} status={source.status} />
           </div>
         ) : (
           <SourceDropzone cellId={source.id} onDone={refresh} />

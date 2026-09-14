@@ -19,6 +19,7 @@ import {
 } from 'lucide-preact';
 import { api } from '../api.js';
 import { navigate, paths } from '../router.js';
+import { MediaInfoBadge, formatSize } from './MediaInfoBadge.jsx';
 
 const STATUS_CLASS = {
   idle: 'badge-idle',
@@ -169,6 +170,7 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
           {cell.kind === 'edit' && cell.mediaUrl && (
             <>
               <video controls src={cell.mediaUrl} class="w-full rounded-md max-h-80" />
+              <MediaInfoBadge cellId={cell.id} status={cell.status} />
               {onAddUpload && (
                 <button class="btn-primary w-fit" onClick={onAddUpload}>
                   <Plus size={15} /> Add upload from this edit
@@ -325,12 +327,18 @@ function EditParamsForm({ cell, onChanged }) {
   const [height, setHeight] = useState(p.height ? String(p.height) : '');
   const [bitrate, setBitrate] = useState(p.bitrateKbps ? String(p.bitrateKbps) : '');
   const [lockAspect, setLockAspect] = useState(p.lockAspect !== false);
-  const [sourceInfo, setSourceInfo] = useState(null);
+  const [info, setInfo] = useState(null);
   const disabled = cell.status !== 'idle';
+  const sourceInfo = info?.source;
+  // Prefer this cell's own last output as the size-estimate baseline: it
+  // already reflects auto-editor's silence cuts, which the source's raw
+  // duration doesn't — so a re-run with tweaked resize/bitrate estimates
+  // much closer to reality than starting from the uncut source every time.
+  const baseInfo = info?.self || sourceInfo;
 
   useEffect(() => {
-    api.getCellSourceInfo(cell.id).then(setSourceInfo).catch(() => setSourceInfo(null));
-  }, [cell.id]);
+    api.getCellInfo(cell.id).then(setInfo).catch(() => setInfo(null));
+  }, [cell.id, cell.status]);
 
   const save = (overrides = {}) =>
     api
@@ -364,6 +372,13 @@ function EditParamsForm({ cell, onChanged }) {
     setLockAspect(next);
     save({ lockAspect: next });
   };
+
+  const estimatedBytes = estimateOutputBytes({
+    baseInfo,
+    width: Number(width) || 0,
+    height: Number(height) || 0,
+    bitrateKbps: Number(bitrate) || 0,
+  });
 
   return (
     <div class="space-y-3">
@@ -436,8 +451,44 @@ function EditParamsForm({ cell, onChanged }) {
           onBlur={() => save()}
         />
       </div>
+
+      {!disabled && estimatedBytes != null && (
+        <p class="text-xs text-slate-500" title="Approximate — based on the current margin/speed/resize/bitrate settings and this source's typical bitrate; actual size depends on scene complexity and how much silence auto-editor cuts.">
+          Estimated output: ~{formatSize(estimatedBytes)} (approx)
+        </p>
+      )}
     </div>
   );
+}
+
+// estimateOutputBytes gives a rough pre-run size estimate. It doesn't know
+// how much auto-editor will cut, so baseInfo's own duration is the best
+// available guess for the output's length — already-cut if this cell has
+// run before, otherwise the uncut source's.
+//
+// Without an explicit bitrate override, it scales baseInfo's own bitrate
+// by the requested resize's pixel-area ratio (CRF-based encodes scale
+// roughly that way). Scaling off baseInfo rather than always off the
+// uncut source matters: once this cell has run once, baseInfo IS that
+// prior output, whose bitrate already reflects this exact footage's real
+// compressibility at roughly the requested settings — a far better
+// reference than the source's very differently-encoded bitrate, which
+// this content may compress nothing like (e.g. a static screen recording
+// compresses much harder than its source bitrate implies).
+function estimateOutputBytes({ baseInfo, width, height, bitrateKbps }) {
+  if (!baseInfo || !baseInfo.durationSec) return null;
+
+  let videoKbps = bitrateKbps;
+  if (!videoKbps) {
+    videoKbps = baseInfo.bitrateKbps || 0;
+    if (width && height && baseInfo.width && baseInfo.height) {
+      videoKbps *= (width * height) / (baseInfo.width * baseInfo.height);
+    }
+  }
+  if (!videoKbps) return null;
+
+  const audioKbps = baseInfo.audioBitrateKbps || 160;
+  return ((videoKbps + audioKbps) * 1000 * baseInfo.durationSec) / 8;
 }
 
 function UploadParamsForm({ cell, editCells, onChanged }) {

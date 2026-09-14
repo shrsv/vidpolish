@@ -3,8 +3,10 @@ package pipeline
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -32,60 +34,107 @@ func probeDuration(ffprobePath, path string) (float64, error) {
 }
 
 // VideoInfo holds the properties of a video needed to show "original"
-// values in the edit UI and to decide whether a resize/bitrate pass is a
-// no-op.
+// values and full media details in the UI, decide whether a resize/
+// bitrate pass is a no-op, and estimate an edit's output size before
+// running it.
 type VideoInfo struct {
-	Width       int `json:"width"`
-	Height      int `json:"height"`
-	BitrateKbps int `json:"bitrateKbps"` // 0 if ffprobe couldn't determine it (e.g. some containers omit stream bit_rate)
+	Width            int     `json:"width"`
+	Height           int     `json:"height"`
+	BitrateKbps      int     `json:"bitrateKbps"`      // video stream bitrate; 0 if ffprobe couldn't determine it
+	AudioBitrateKbps int     `json:"audioBitrateKbps"` // 0 if no audio stream or it didn't report a bitrate
+	DurationSec      float64 `json:"durationSec"`
+	FrameRate        float64 `json:"frameRate"`
+	SizeBytes        int64   `json:"sizeBytes"`
 }
 
-// ProbeVideoInfo reads width, height, and bitrate off a video's first
-// video stream via ffprobe. Bitrate falls back to the container-level
-// bit_rate (format.bit_rate) when the stream doesn't report its own, which
-// happens for some inputs.
+// probeJSON is the shape of `ffprobe -of json` output this package reads
+// from; only the fields ProbeVideoInfo needs are declared.
+type probeJSON struct {
+	Streams []struct {
+		CodecType  string `json:"codec_type"`
+		Width      int    `json:"width"`
+		Height     int    `json:"height"`
+		BitRate    string `json:"bit_rate"`
+		RFrameRate string `json:"r_frame_rate"`
+	} `json:"streams"`
+	Format struct {
+		Duration string `json:"duration"`
+		BitRate  string `json:"bit_rate"`
+	} `json:"format"`
+}
+
+// ProbeVideoInfo reads a video's key properties via ffprobe: resolution,
+// framerate, and video/audio bitrates off the respective streams (falling
+// back to the container-level bit_rate when a stream doesn't report its
+// own), plus duration from the container and file size from the
+// filesystem directly (more reliable than the container's own declared
+// size for a file that might still be mid-write).
 func ProbeVideoInfo(ffprobePath, path string) (VideoInfo, error) {
 	cmd := exec.Command(ffprobePath, "-v", "error",
-		"-select_streams", "v:0",
-		"-show_entries", "stream=width,height,bit_rate:format=bit_rate",
-		"-of", "default=noprint_wrappers=1", path)
+		"-show_entries", "stream=codec_type,width,height,bit_rate,r_frame_rate:format=duration,bit_rate",
+		"-of", "json", path)
 	out, err := cmd.Output()
 	if err != nil {
 		return VideoInfo{}, fmt.Errorf("probing video info of %s: %w", path, err)
 	}
 
+	var probed probeJSON
+	if err := json.Unmarshal(out, &probed); err != nil {
+		return VideoInfo{}, fmt.Errorf("parsing ffprobe output for %s: %w", path, err)
+	}
+
 	var info VideoInfo
-	var streamBitrate, formatBitrate int
-	bitRateSeen := 0
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		n, _ := strconv.Atoi(val)
-		switch key {
-		case "width":
-			info.Width = n
-		case "height":
-			info.Height = n
-		case "bit_rate":
-			// -show_entries lists the stream section before the format
-			// section, so the first bit_rate= line is the stream's own
-			// (may be "N/A" -> 0), the second is the format-level fallback.
-			bitRateSeen++
-			if bitRateSeen == 1 {
-				streamBitrate = n
-			} else {
-				formatBitrate = n
+	for _, s := range probed.Streams {
+		switch s.CodecType {
+		case "video":
+			if info.Width == 0 && info.Height == 0 {
+				info.Width = s.Width
+				info.Height = s.Height
+				info.FrameRate = parseFrameRate(s.RFrameRate)
+				info.BitrateKbps = atoiOr(s.BitRate, 0) / 1000
+			}
+		case "audio":
+			if info.AudioBitrateKbps == 0 {
+				info.AudioBitrateKbps = atoiOr(s.BitRate, 0) / 1000
 			}
 		}
 	}
-	if streamBitrate > 0 {
-		info.BitrateKbps = streamBitrate / 1000
-	} else if formatBitrate > 0 {
-		info.BitrateKbps = formatBitrate / 1000
+	if info.BitrateKbps == 0 {
+		info.BitrateKbps = atoiOr(probed.Format.BitRate, 0) / 1000
 	}
+	info.DurationSec, _ = strconv.ParseFloat(probed.Format.Duration, 64)
+
+	if stat, err := os.Stat(path); err == nil {
+		info.SizeBytes = stat.Size()
+	}
+
 	return info, nil
+}
+
+// parseFrameRate turns ffprobe's r_frame_rate ("30/1", "30000/1001", or
+// "0/0" when unknown) into a plain float.
+func parseFrameRate(s string) float64 {
+	num, den, ok := strings.Cut(s, "/")
+	if !ok {
+		return 0
+	}
+	n, errN := strconv.ParseFloat(num, 64)
+	d, errD := strconv.ParseFloat(den, 64)
+	if errN != nil || errD != nil || d == 0 {
+		return 0
+	}
+	return n / d
+}
+
+// atoiOr parses s as an int, returning def if s is empty, "N/A", or
+// otherwise unparseable — ffprobe reports missing numeric fields that way
+// rather than omitting them.
+func atoiOr(s string, def int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 // stageReporter maps one pipeline stage's local progress (0..1) into the
