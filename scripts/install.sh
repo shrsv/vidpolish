@@ -1,7 +1,15 @@
 #!/bin/bash
 # vidpolish installer - downloads and installs the latest (or a pinned)
 # vidpolish release binary.
-# Usage: curl -fsSL https://raw.githubusercontent.com/shrsv/vidpolish/main/scripts/install.sh | bash
+# Usage: curl -fSL --connect-timeout 10 --ipv4 https://raw.githubusercontent.com/shrsv/vidpolish/main/scripts/install.sh | bash
+#
+# --ipv4/--connect-timeout on that outer curl matter: they're what fetches
+# this script in the first place, before a single line below has run, so no
+# echo in here can help if *that* connection stalls. On machines with a
+# broken/blackholed IPv6 route (WSL2 is a common case) curl's default
+# happy-eyeballs behavior tries IPv6 first and can hang for minutes with no
+# output at all before falling back to IPv4 - which looks exactly like "it's
+# just stuck" until Ctrl-C'd and retried. Forcing IPv4 up front avoids that.
 #
 # - Installs to ~/.local/bin (user-writable, no sudo required).
 # - Sets up PATH via an idempotent ~/.vidpolish/env shim sourced from shell
@@ -99,7 +107,7 @@ if [ -n "${VIDPOLISH_VERSION:-}" ]; then
     echo -e "${GREEN}OK${NC} using pinned version: ${TAG}"
 else
     echo "Querying GitHub for the latest release (timeout 15s)..."
-    LATEST_JSON=$(curl --connect-timeout 10 --max-time 15 -fsSL "https://api.github.com/repos/${REPO}/releases/latest") \
+    LATEST_JSON=$(curl --ipv4 --connect-timeout 10 --max-time 15 -fsSL "https://api.github.com/repos/${REPO}/releases/latest") \
         || fail "failed to query GitHub for the latest release" \
                 "Check your internet connection and try again, or set VIDPOLISH_VERSION=vX.Y.Z to skip this lookup."
     TAG=$(echo "$LATEST_JSON" | tr -d '\n' | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
@@ -127,7 +135,7 @@ trap 'rm -f "$TMP_FILE"' EXIT
 # ETA) prints live to the terminal so a slow connection is visibly
 # progressing rather than looking hung. -w captures the HTTP status
 # separately on stdout, after the meter has finished.
-HTTP_CODE=$(curl -L --connect-timeout 15 --max-time 600 \
+HTTP_CODE=$(curl -L --ipv4 --connect-timeout 15 --max-time 600 \
     -w "%{http_code}" -o "$TMP_FILE" "$FULL_URL") \
     || fail "download failed (network error or timeout after 10 minutes)" \
             "Check your internet connection and try again, or download ${BINARY_NAME} manually from https://github.com/${REPO}/releases/tag/${TAG}"

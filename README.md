@@ -69,8 +69,14 @@ after:
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/shrsv/vidpolish/main/scripts/install.sh | bash
+curl -fSL --connect-timeout 10 --ipv4 https://raw.githubusercontent.com/shrsv/vidpolish/main/scripts/install.sh | bash
 ```
+
+`--ipv4` and `--connect-timeout 10` avoid a long silent hang on machines (WSL2
+in particular) with a broken/blackholed IPv6 route: curl tries IPv6 first by
+default and can stall for minutes before falling back, with nothing printed
+yet since the script hasn't started running. If it ever does seem stuck,
+Ctrl-C and rerun, or pass `--ipv4` yourself.
 
 This script:
 
