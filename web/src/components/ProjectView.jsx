@@ -57,10 +57,19 @@ export function ProjectView({ projectId, initialCellSeq }) {
   const scrollToSection = (key) => sectionRefs.current[key]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   const addEdit = async () => {
+    const prevEdit = editCells[editCells.length - 1];
+    const prevParams = prevEdit?.params || {};
     await api.createCell(projectId, {
       kind: 'edit',
       parentCellId: source.id,
-      params: { margin: '0.2s', speed: 1.0 },
+      params: {
+        margin: prevParams.margin ?? '0.2s',
+        speed: prevParams.speed ?? 1.0,
+        ...(prevParams.width != null ? { width: prevParams.width } : {}),
+        ...(prevParams.height != null ? { height: prevParams.height } : {}),
+        ...(prevParams.bitrateKbps != null ? { bitrateKbps: prevParams.bitrateKbps } : {}),
+        ...(prevParams.lockAspect != null ? { lockAspect: prevParams.lockAspect } : {}),
+      },
     });
     refresh();
   };

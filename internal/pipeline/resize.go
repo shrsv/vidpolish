@@ -12,12 +12,16 @@ func resizeVideo(ffmpegPath, input, output string, width, height, bitrateKbps in
 	args := []string{"-i", input}
 
 	if width > 0 || height > 0 {
+		// libx264 with yuv420p requires even dimensions; an explicit
+		// width/height from the caller (e.g. an aspect-locked UI field)
+		// can land on an odd value, so round it down to the nearest even
+		// number instead of passing it straight to ffmpeg.
 		w, h := "-2", "-2"
 		if width > 0 {
-			w = fmt.Sprintf("%d", width)
+			w = fmt.Sprintf("trunc(%d/2)*2", width)
 		}
 		if height > 0 {
-			h = fmt.Sprintf("%d", height)
+			h = fmt.Sprintf("trunc(%d/2)*2", height)
 		}
 		args = append(args, "-vf", fmt.Sprintf("scale=%s:%s", w, h))
 	}
