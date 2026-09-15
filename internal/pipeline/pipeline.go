@@ -271,14 +271,27 @@ func Process(opts Options) (string, error) {
 	return finalOut, nil
 }
 
+// exists reports whether path is a usable cached artifact: present and
+// non-empty. A 0-byte file (e.g. left behind by an ffmpeg run that opened
+// its output but failed before writing any frames) must not be mistaken
+// for a valid cache hit, or a later run silently "succeeds" by copying
+// that empty file through without ever re-running the failed stage.
 func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	info, err := os.Stat(path)
+	return err == nil && info.Size() > 0
 }
 
 func dirHasWav(dir string) bool {
 	files, err := wavFiles(dir)
-	return err == nil && len(files) > 0
+	if err != nil {
+		return false
+	}
+	for name := range files {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Size() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func firstWavIn(dir string) (string, error) {

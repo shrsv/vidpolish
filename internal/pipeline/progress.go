@@ -214,6 +214,13 @@ func runFFmpegWithProgress(ffmpegPath string, args []string, totalDuration float
 	io.Copy(io.Discard, stdout)
 
 	if err := cmd.Wait(); err != nil {
+		// ffmpeg opens/truncates its output file before it starts
+		// encoding, so a failure partway through still leaves a
+		// (typically empty) file behind at the output path. Remove it
+		// so a later run doesn't mistake it for a valid cached result.
+		if len(fullArgs) > 0 {
+			os.Remove(fullArgs[len(fullArgs)-1])
+		}
 		return fmt.Errorf("ffmpeg failed: %w\n%s", err, stderrBuf.String())
 	}
 	return nil

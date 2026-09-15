@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 )
@@ -92,6 +93,7 @@ func autoEdit(autoEditorPath, input, output, margin string, speed float64, repor
 	io.Copy(io.Discard, stdout)
 
 	if err := cmd.Wait(); err != nil {
+		os.Remove(output) // don't leave a partial file that a later run's cache check mistakes for valid
 		return fmt.Errorf("auto-editor failed: %w\n%s", err, lastErrTail)
 	}
 	if report != nil {

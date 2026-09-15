@@ -63,6 +63,14 @@ func denoise(deepFilterPath, inputWav, outDir string, duration float64, report f
 	out, err := cmd.CombinedOutput()
 	close(stop)
 	if err != nil {
+		// deep-filter may have written a partial wav before failing;
+		// remove anything new so a later run's dirHasWav cache check
+		// doesn't mistake it for a completed denoise.
+		if after, aferr := wavFiles(outDir); aferr == nil {
+			if newFile := diffNewFile(before, after); newFile != "" {
+				os.Remove(filepath.Join(outDir, newFile))
+			}
+		}
 		return "", fmt.Errorf("deep-filter failed: %w\n%s", err, out)
 	}
 	if report != nil {
