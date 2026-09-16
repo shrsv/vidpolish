@@ -8,30 +8,33 @@ commit can complete — that will hang an agent session.
 
 For a normal change, use one of these instead of a bare `git commit`:
 
-- **Non-interactive review, 1-2 passes for anything non-trivial**: run
-  `lrc review --no-serve --output json --staged` after `git add`. Read the
-  JSON findings and fix anything real, then re-stage and run it again. Two
-  passes is usually enough — don't loop indefinitely chasing diminishing
-  findings. Note this command only *reports* findings — it does **not**
-  write an attestation, so `git commit` right after it will still trigger
-  the blocking browser review. Follow it with an explicit skip or vouch
-  (below) once you're satisfied with the findings.
+- **Agent mode (default for anything non-trivial)**: run `lrc review
+  --agent-mode` after `git add`. This runs a real, non-interactive AI review
+  against the staged diff, prints the findings as JSON, and — if the review
+  completes — automatically writes an `agent-reviewed` attestation (distinct
+  from `skipped`/`vouched`), so the `git commit` right after it proceeds
+  without a separate skip/vouch step. Read the findings and fix anything
+  real; you can run `lrc review --agent-mode` again (add `--force` to rerun
+  on the same tree) after fixing issues — 1-2 passes is usually enough,
+  don't loop indefinitely chasing diminishing findings. If the review fails
+  (network/quota/timeout), no attestation is written, so `git commit` falls
+  back to the options below.
 - **Skip review** (only when the user explicitly asks to skip/bypass
-  review, or you just ran the non-interactive review above and judged the
-  change safe): `lrc review --staged --skip`. This writes an attestation
-  for the currently staged tree without running AI review at all.
+  review, or for trivial/docs-only changes): `lrc review --staged --skip`.
+  This writes an attestation for the currently staged tree without running
+  AI review at all.
 - **Manual vouch** (user explicitly wants to approve without AI review):
   `lrc review --staged --vouch`.
 
-After a skip or vouch succeeds, run `git commit` as its own command (not
-chained with `&&`/`;` onto another command — the hook rejects that). The
-attestation is tied to the exact staged tree; it's cleared the moment a
-commit happens, so re-staging anything (including `git commit --amend`)
-requires re-running the skip/vouch step before the next commit. Never leave
-a bare `git commit` to open the blocking browser review and then just wait
-on it — that hangs the session; if a plain review or commit does end up
-waiting on a browser decision, stop it and re-do the commit via skip/vouch
-instead of leaving it pending.
+After agent-mode, a skip, or a vouch succeeds, run `git commit` as its own
+command (not chained with `&&`/`;` onto another command — the hook rejects
+that). The attestation is tied to the exact staged tree; it's cleared the
+moment a commit happens, so re-staging anything (including `git commit
+--amend`) requires re-running agent-mode/skip/vouch before the next commit.
+Never leave a bare `git commit` to open the blocking browser review and then
+just wait on it — that hangs the session; if a plain review or commit does
+end up waiting on a browser decision, stop it and re-do the commit via
+agent-mode/skip/vouch instead of leaving it pending.
 
 Always run `bash <lrc plugin dir>/scripts/ensure-lrc.sh` first if a review
 command reports the backend isn't ready.
