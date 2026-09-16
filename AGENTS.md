@@ -57,3 +57,25 @@ command reports the backend isn't ready.
   then `git push && git push --tags`, then `make release-publish` (needs
   `gh` authenticated) to cross-compile and publish the GitHub Release,
   including the Windows GUI installer (`vidpolish-setup-windows-amd64.exe`).
+
+### Write a real release description every time
+
+`make release-publish` currently calls `gh release create ... --generate-notes`,
+which only auto-fills a raw commit list — that is **not** a substitute for an
+actual description. Every release must ship with a real, hand-written summary
+of what changed and why, aimed at someone reading the GitHub Releases page
+(not a git log). Don't skip this because the Makefile "already did it."
+
+- Before or right after `make release-publish`, write 3-6 bullet points
+  covering: what's new/fixed/changed in this release, and anything a user
+  needs to know (breaking changes, new install steps, known issues) — same
+  spirit as a changelog entry, not a commit message.
+- Apply it with `gh release edit "vX.Y.Z" --notes-file <path>` (or
+  `--notes "..."` for something short) to replace the auto-generated notes.
+  This can be done in the same breath as `make release-publish`, or as an
+  immediate follow-up — either way, no release is considered done until its
+  GitHub page has a real description instead of just the raw commit list.
+- If a pattern of frequent releases makes this tedious, consider adopting a
+  per-release notes file convention (e.g. `docs/releases/vX.Y.Z.md`, kept in
+  the repo and used as the `--notes-file` source) rather than writing it
+  ad hoc each time — propose this to the user before introducing it.
