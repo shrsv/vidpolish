@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -121,7 +122,14 @@ func TestSourceUploadAndEditCellCreation(t *testing.T) {
 		t.Fatalf("sourceFilename = %v", sourceResp["sourceFilename"])
 	}
 
-	// Serve it back via /api/media.
+	// Serve it back via /api/media, and check the actual bytes/size match
+	// what was uploaded - not just the status code. handleUploadSource
+	// used to close its destination file via defer, which only runs
+	// after this response is already sent; a request landing right after
+	// upload could (and, on Windows/NTFS, reliably did) see a
+	// zero-length file because Close hadn't committed its size metadata
+	// yet. Closing explicitly before responding fixed that; this asserts
+	// the content is actually all there, immediately, every time.
 	mediaResp, err := http.Get(ts.URL + sourceResp["mediaUrl"].(string))
 	if err != nil {
 		t.Fatalf("media get: %v", err)
@@ -129,6 +137,17 @@ func TestSourceUploadAndEditCellCreation(t *testing.T) {
 	defer mediaResp.Body.Close()
 	if mediaResp.StatusCode != http.StatusOK {
 		t.Fatalf("media status = %d", mediaResp.StatusCode)
+	}
+	mediaBody, err := io.ReadAll(mediaResp.Body)
+	if err != nil {
+		t.Fatalf("reading media body: %v", err)
+	}
+	const wantBody = "fake video bytes"
+	if string(mediaBody) != wantBody {
+		t.Fatalf("media body = %q, want %q", mediaBody, wantBody)
+	}
+	if got := mediaResp.Header.Get("Content-Length"); got != fmt.Sprint(len(wantBody)) {
+		t.Fatalf("Content-Length = %q, want %d", got, len(wantBody))
 	}
 
 	// Now create an edit cell referencing the source cell.
@@ -153,6 +172,51 @@ func TestSourceUploadAndEditCellCreation(t *testing.T) {
 	})
 	if resp3.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for edit-under-edit, got %d: %v", resp3.StatusCode, badResp)
+	}
+}
+
+// TestSourceUploadFromPath covers the Wails GUI's native-file-dialog/
+// drag-drop path (POST /api/cells/{id}/source-path): the Go backend reads
+// the video directly off disk by path, rather than through a browser File
+// object read over the request body - added because a WebView2-hosted
+// page's File objects can come back unreadable (see handlers_run.go's
+// writeSourceVideo doc comment).
+func TestSourceUploadFromPath(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	_, proj := doJSON(t, http.MethodPost, ts.URL+"/api/projects", map[string]string{"name": "P"})
+	sourceID := proj["cells"].([]any)[0].(map[string]any)["id"].(string)
+
+	srcPath := filepath.Join(t.TempDir(), "clip.mp4")
+	if err := os.WriteFile(srcPath, []byte("fake video bytes from disk"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	resp, sourceResp := doJSON(t, http.MethodPost, ts.URL+"/api/cells/"+sourceID+"/source-path", map[string]string{"path": srcPath})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("upload-from-path status = %d, body = %v", resp.StatusCode, sourceResp)
+	}
+	if sourceResp["sourceFilename"] != "clip.mp4" {
+		t.Fatalf("sourceFilename = %v", sourceResp["sourceFilename"])
+	}
+
+	mediaResp, err := http.Get(ts.URL + sourceResp["mediaUrl"].(string))
+	if err != nil {
+		t.Fatalf("media get: %v", err)
+	}
+	defer mediaResp.Body.Close()
+	body, err := io.ReadAll(mediaResp.Body)
+	if err != nil {
+		t.Fatalf("reading media body: %v", err)
+	}
+	if string(body) != "fake video bytes from disk" {
+		t.Fatalf("media body = %q", body)
+	}
+
+	// A nonexistent path is a client error, not a server crash.
+	resp2, _ := doJSON(t, http.MethodPost, ts.URL+"/api/cells/"+sourceID+"/source-path", map[string]string{"path": filepath.Join(t.TempDir(), "missing.mp4")})
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("missing path status = %d, want 400", resp2.StatusCode)
 	}
 }
 

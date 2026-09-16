@@ -88,9 +88,18 @@ This script:
   dependencies (deep-filter, auto-editor, resvg, font) are fetched right
   away.
 
-Supported platforms: Linux (amd64/arm64) and macOS (amd64/arm64). Windows
-users can grab `vidpolish-windows-amd64.exe` directly from the releases
-page.
+Supported platforms: Linux (amd64/arm64) and macOS (amd64/arm64).
+
+**Windows:** download and run `vidpolish-setup-<version>.exe` from the
+[latest release](https://github.com/shrsv/vidpolish/releases/latest) — a
+double-click installer (built with [Wails](https://wails.io)) that puts a
+native GUI app on your Start Menu/Desktop and the `vidpolish` CLI on your
+`PATH`. It fetches the WebView2 runtime automatically if it's missing, and
+the GUI/CLI fetch ffmpeg, deep-filter, auto-editor, resvg, and the font on
+first use, same as the installer script does on Linux/macOS. If you'd
+rather skip the installer, the plain `vidpolish-windows-amd64.exe` CLI
+binary is also on the releases page (you'll need ffmpeg on `PATH`
+yourself in that case, or let the CLI fetch it for you on first run).
 
 Then either run it once:
 
@@ -256,7 +265,8 @@ simple CLI.
 ## Prerequisites
 
 You need **Go** and **ffmpeg** installed before building or running
-vidpolish.
+vidpolish, except on Windows, where ffmpeg is also fetched automatically
+(see the table below) since it isn't reliably preinstalled there.
 
 Everything else (`deep-filter`, `auto-editor`, `resvg`, the Inter font) is
 fetched automatically the first time you run the tool. You do not need to
@@ -269,7 +279,7 @@ plain `go build` never requires Node.
 | Tool | Why it's needed | How to get it |
 | --- | --- | --- |
 | [Go](https://go.dev/dl/) 1.24+ | builds and runs the CLI | `apt install golang-go`, `brew install go`, or the official installer |
-| `ffmpeg` / `ffprobe` | splitting, remuxing, and probing video/audio | `apt install ffmpeg`, `brew install ffmpeg`, or download from [ffmpeg.org](https://ffmpeg.org/download.html) |
+| `ffmpeg` / `ffprobe` | splitting, remuxing, and probing video/audio | `apt install ffmpeg`, `brew install ffmpeg`, or download from [ffmpeg.org](https://ffmpeg.org/download.html); on Windows, downloaded automatically if not already on `PATH`, from [gyan.dev's builds](https://www.gyan.dev/ffmpeg/builds/), into `%LOCALAPPDATA%\vidpolish\bin` |
 | `deep-filter` | audio denoising | downloaded automatically by vidpolish, from the [DeepFilterNet releases](https://github.com/Rikorose/DeepFilterNet/releases), into `~/.cache/vidpolish/bin` |
 | `auto-editor` | silence cutting and speed changes | downloaded automatically by vidpolish, from the [auto-editor releases](https://github.com/WyattBlue/auto-editor/releases), into `~/.cache/vidpolish/bin` |
 | `resvg` | rasterizing auto-generated YouTube thumbnails | downloaded automatically by vidpolish, from the [resvg releases](https://github.com/linebender/resvg/releases), into `~/.cache/vidpolish/bin` on Linux/macOS (see the platform note below for Windows/linux-arm64) |
@@ -672,7 +682,8 @@ npm run build   # writes internal/server/webdist for `go build` to embed
 
 ```
 cmd/vidpolish         CLI entrypoint (flag parsing, wiring)
-internal/binmgr        resolves/downloads deep-filter, auto-editor, resvg, and the Inter font
+cmd/vidpolish-gui      native Windows GUI (Wails), wraps internal/server in a window
+internal/binmgr        resolves/downloads deep-filter, auto-editor, resvg, ffmpeg (Windows), and the Inter font
 internal/browseropen   opens a URL in the default browser
 internal/cache         the ~/.vidpolish/cache artifact cache
 internal/config        ~/.vidpolish/config.toml load/init/save
@@ -710,6 +721,23 @@ go build ./...
 go vet ./...
 go test ./...
 ```
+
+### Building the Windows GUI installer
+
+The Windows GUI (`cmd/vidpolish-gui`, built with [Wails](https://wails.io))
+and its NSIS installer can be cross-compiled from Linux/WSL2 using
+mingw-w64 — no Windows machine needed for the build itself:
+
+```sh
+./scripts/install-gui-toolchain.sh   # one-time: wails CLI, mingw-w64, nsis
+make gui-build-windows                # -> ~/Downloads/vidpolish-setup-<version>.exe
+```
+
+Toolchain versions (wails, nsis, mingw-w64, plus Go/Node) are pinned in
+[`versions.env`](versions.env). `make release-build` / `release-publish`
+run the same steps as part of a normal release, attaching
+`vidpolish-setup-windows-amd64.exe` to the GitHub Release alongside the
+plain per-platform binaries.
 
 ## MCP server
 

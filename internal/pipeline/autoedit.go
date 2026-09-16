@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+
+	"vidpolish/internal/procutil"
 )
 
 // muxVideoAudio combines a (silent) video stream with a separate audio
@@ -49,6 +51,7 @@ func autoEdit(autoEditorPath, input, output, margin string, speed float64, repor
 	}
 
 	cmd := exec.Command(autoEditorPath, args...)
+	procutil.HideWindow(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("auto-editor: %w", err)

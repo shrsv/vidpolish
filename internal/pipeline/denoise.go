@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"vidpolish/internal/procutil"
 )
 
 // assumedDenoiseRTF is a conservative (slightly pessimistic) estimate of
@@ -37,6 +39,7 @@ func denoise(deepFilterPath, inputWav, outDir string, duration float64, report f
 	}
 
 	cmd := exec.Command(deepFilterPath, inputWav, "-o", outDir)
+	procutil.HideWindow(cmd)
 
 	stop := make(chan struct{})
 	if report != nil && duration > 0 {

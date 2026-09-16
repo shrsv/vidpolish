@@ -55,6 +55,30 @@ for platform in "${PLATFORMS[@]}"; do
         ./cmd/vidpolish
 done
 
+echo "==> Building Windows GUI + NSIS installer"
+if ! command -v wails >/dev/null 2>&1 || ! command -v makensis >/dev/null 2>&1 || ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+    echo "error: wails/makensis/x86_64-w64-mingw32-gcc not found; run scripts/install-gui-toolchain.sh first" >&2
+    exit 1
+fi
+
+GUI_DIR="cmd/vidpolish-gui"
+GUI_BIN_DIR="${GUI_DIR}/build/bin"
+mkdir -p "$GUI_BIN_DIR"
+cp "${OUT_DIR}/vidpolish-windows-amd64.exe" "${GUI_BIN_DIR}/vidpolish.exe"
+
+tmp_wails_json="$(mktemp)"
+sed "s/\"productVersion\": \"[^\"]*\"/\"productVersion\": \"${RAW_VERSION}\"/" \
+    "${GUI_DIR}/wails.json" > "$tmp_wails_json"
+mv "$tmp_wails_json" "${GUI_DIR}/wails.json"
+
+(
+    cd "$GUI_DIR"
+    CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
+        wails build -platform windows/amd64 -ldflags "-X main.version=${RAW_VERSION}" -nsis -devtools
+)
+
+cp "${GUI_BIN_DIR}/vidpolish-amd64-installer.exe" "${OUT_DIR}/vidpolish-setup-windows-amd64.exe"
+
 echo "==> Writing checksums"
 (cd "$OUT_DIR" && sha256sum vidpolish-* > checksums.txt)
 

@@ -59,7 +59,32 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
       }
       setLive(msg);
     });
-    return () => stopRef.current?.();
+
+    // The actual progress driver, not just a fallback: SSE doesn't
+    // reliably deliver inside the Wails desktop build's embedded webview
+    // (confirmed - a real run there showed "running" the whole time with
+    // no live text ever arriving, then correctly finished, so the
+    // subscription above silently never received anything at all). Poll
+    // the real status/statusMessage directly instead; this is what
+    // actually keeps the progress text moving and picks up completion
+    // even if the SSE message for either never shows up. Left the SSE
+    // subscription in place too since it's harmless and does work over a
+    // plain browser (`vidpolish ui`), just no longer relied on alone.
+    const poll = setInterval(() => {
+      api
+        .getCell(cell.id)
+        .then((c) => {
+          if (c.statusMessage) setLive(c.statusMessage);
+          if (c.youtubeUrl) setYoutubeUrl(c.youtubeUrl);
+          if (c.status !== 'running') onChanged();
+        })
+        .catch(() => {});
+    }, 1000);
+
+    return () => {
+      stopRef.current?.();
+      clearInterval(poll);
+    };
   }, [cell.status, cell.id]);
 
   const run = () => api.runCell(cell.id).then(onChanged);

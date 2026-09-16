@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"vidpolish/internal/procutil"
 )
 
 // probeDuration returns the duration of a media file in seconds, used to
@@ -22,6 +24,7 @@ func probeDuration(ffprobePath, path string) (float64, error) {
 	cmd := exec.Command(ffprobePath, "-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1", path)
+	procutil.HideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("probing duration of %s: %w", path, err)
@@ -73,6 +76,7 @@ func ProbeVideoInfo(ffprobePath, path string) (VideoInfo, error) {
 	cmd := exec.Command(ffprobePath, "-v", "error",
 		"-show_entries", "stream=codec_type,width,height,bit_rate,r_frame_rate:format=duration,bit_rate",
 		"-of", "json", path)
+	procutil.HideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return VideoInfo{}, fmt.Errorf("probing video info of %s: %w", path, err)
@@ -184,6 +188,7 @@ func (r *stageReporter) report(local float64) {
 func runFFmpegWithProgress(ffmpegPath string, args []string, totalDuration float64, report func(local float64)) error {
 	fullArgs := append([]string{"-y", "-progress", "pipe:1", "-nostats"}, args...)
 	cmd := exec.Command(ffmpegPath, fullArgs...)
+	procutil.HideWindow(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

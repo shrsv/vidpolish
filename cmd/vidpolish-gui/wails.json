@@ -1,0 +1,15 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "vidpolish",
+  "outputfilename": "vidpolish-gui",
+  "frontend:install": "",
+  "frontend:build": "",
+  "author": {
+    "name": "Shrijith Venkatramana"
+  },
+  "info": {
+    "companyName": "vidpolish",
+    "productName": "vidpolish",
+    "productVersion": "0.3.1"
+  }
+}

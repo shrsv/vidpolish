@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+
+	"vidpolish/internal/procutil"
 )
 
 // ExportGIF renders input to an animated GIF at output using ffmpeg's
@@ -23,6 +25,7 @@ func ExportGIF(ffmpegPath, input, output string, fps, width int) error {
 	filter += ",split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"
 
 	cmd := exec.Command(ffmpegPath, "-y", "-i", input, "-vf", filter, output)
+	procutil.HideWindow(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

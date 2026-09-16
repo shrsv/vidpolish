@@ -65,7 +65,29 @@ func TestResvgAssetUnsupportedPlatformsReturnError(t *testing.T) {
 	if _, _, err := resvgAssetFor("linux", "arm64", "0.48.1"); err == nil {
 		t.Error("expected error for linux/arm64 (resvg publishes no such binary), got nil")
 	}
-	if _, _, err := resvgAssetFor("windows", "amd64", "0.48.1"); err == nil {
-		t.Error("expected error for windows (resvg publishes no such binary), got nil")
+	if _, _, err := resvgAssetFor("windows", "arm64", "0.47.0"); err == nil {
+		t.Error("expected error for windows/arm64 (resvg publishes no such binary), got nil")
+	}
+}
+
+func TestResvgAssetWindowsAmd64(t *testing.T) {
+	url, ext, err := resvgAssetFor("windows", "amd64", "0.47.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "https://github.com/linebender/resvg/releases/download/v0.47.0/resvg-win64.zip"
+	if url != want {
+		t.Errorf("url = %q, want %q", url, want)
+	}
+	if ext != "zip" {
+		t.Errorf("ext = %q, want zip", ext)
+	}
+}
+
+func TestFFmpegWindowsAsset(t *testing.T) {
+	url := ffmpegWindowsAsset()
+	want := "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+	if url != want {
+		t.Errorf("url = %q, want %q", url, want)
 	}
 }

@@ -15,21 +15,25 @@ import (
 )
 
 // Server holds the shared state behind the API: the database, the SSE
-// hub for live progress, and the job tracker preventing double-runs.
+// hub for live cell/YouTube-login progress, the job tracker preventing
+// double-runs, and the tool-download tracker (polled, not SSE - see
+// toolTracker).
 type Server struct {
-	db   *store.DB
-	hub  *hub
-	jobs *jobTracker
-	mux  *http.ServeMux
+	db    *store.DB
+	hub   *hub
+	jobs  *jobTracker
+	tools *toolTracker
+	mux   *http.ServeMux
 }
 
 // New builds a Server backed by db and wires up all routes.
 func New(db *store.DB) *Server {
 	s := &Server{
-		db:   db,
-		hub:  newHub(),
-		jobs: newJobTracker(),
-		mux:  http.NewServeMux(),
+		db:    db,
+		hub:   newHub(),
+		jobs:  newJobTracker(),
+		tools: newToolTracker(),
+		mux:   http.NewServeMux(),
 	}
 	s.routes()
 	return s
@@ -50,6 +54,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/projects/{id}/reorder", s.handleReorderCells)
 
 	s.mux.HandleFunc("POST /api/cells/{id}/source", s.handleUploadSource)
+	s.mux.HandleFunc("POST /api/cells/{id}/source-path", s.handleUploadSourceFromPath)
 	s.mux.HandleFunc("PATCH /api/cells/{id}", s.handleUpdateCell)
 	s.mux.HandleFunc("POST /api/cells/{id}/run", s.handleRunCell)
 	s.mux.HandleFunc("GET /api/cells/{id}", s.handleGetCell)
@@ -70,7 +75,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/youtube/login/events", s.handleYouTubeLoginEvents)
 
 	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
+	s.mux.HandleFunc("POST /api/tools/resolve-all", s.handleResolveAllTools)
 	s.mux.HandleFunc("POST /api/tools/{name}/resolve", s.handleResolveTool)
+	s.mux.HandleFunc("POST /api/tools/{name}/redownload", s.handleRedownloadTool)
 
 	s.mux.HandleFunc("GET /api/cache", s.handleListCache)
 	s.mux.HandleFunc("DELETE /api/cache/{fingerprint}", s.handleDeleteCacheEntry)

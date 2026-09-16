@@ -1,5 +1,6 @@
 .PHONY: build ui dev web-install web-build web-dev test vet fmt deps clean \
-	version bump-patch bump-minor bump-major tag-release release-build release-publish
+	version bump-patch bump-minor bump-major tag-release release-build release-publish \
+	gui-toolchain-check gui-build gui-build-windows
 
 # Build the vidpolish binary (embeds internal/server/webdist as-is;
 # run `make web-build` first if you've changed the frontend).
@@ -57,6 +58,28 @@ deps: build
 # ~/.vidpolish state.
 clean:
 	rm -f vidpolish
+	rm -rf cmd/vidpolish-gui/build/bin
+
+# --- Native GUI (Wails) -------------------------------------------------
+
+# Verify the GUI/installer toolchain (wails CLI, mingw-w64, nsis) is
+# installed and matches versions.env; see scripts/install-gui-toolchain.sh.
+gui-toolchain-check:
+	@./scripts/install-gui-toolchain.sh
+
+# Build the native GUI app for the host OS (dev-machine smoke test only;
+# needs the host's own GUI toolkit dev headers, e.g. libgtk-3-dev and
+# libwebkit2gtk-4.0-dev on Linux - see `wails doctor`). Not used for the
+# Windows installer; see gui-build-windows for that.
+gui-build: web-build
+	cd cmd/vidpolish-gui && wails build
+
+# Cross-compile the Windows GUI + CLI and package them into a single NSIS
+# installer, dropped at ~/Downloads/vidpolish-setup-<version>.exe for
+# testing on a real/VM Windows machine. Requires
+# `make gui-toolchain-check` to pass first.
+gui-build-windows:
+	@./scripts/build-gui-windows.sh "$$(cat VERSION)"
 
 # --- Release process ---------------------------------------------------
 #

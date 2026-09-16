@@ -20,6 +20,7 @@ import (
 	"text/template"
 
 	"vidpolish/internal/binmgr"
+	"vidpolish/internal/procutil"
 )
 
 const (
@@ -107,6 +108,7 @@ func Generate(opts Options) (string, error) {
 		"-h", fmt.Sprint(canvasHeight),
 		svgPath, opts.OutPath,
 	)
+	procutil.HideWindow(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("resvg failed: %w\n%s", err, out)
 	}
@@ -182,6 +184,7 @@ func rasterizeSVGLogo(resvgPath, svgPath string) (string, error) {
 	// Render at a fixed height with resvg computing a proportional width
 	// (-h alone preserves aspect ratio).
 	cmd := exec.Command(resvgPath, "--skip-system-fonts", "-h", fmt.Sprint(int(logoMaxHeight)*2), svgPath, pngPath)
+	procutil.HideWindow(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("rasterizing logo with resvg: %w\n%s", err, out)
 	}

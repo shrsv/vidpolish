@@ -98,8 +98,9 @@ func autoEditorBinName() string {
 
 // resvgAsset returns the GitHub release download URL for the resvg CLI
 // binary matching the current OS/arch. resvg only publishes prebuilt
-// binaries for linux/amd64 and darwin (amd64/arm64); other platforms are
-// expected to have resvg installed manually and on PATH.
+// Windows binaries up to v0.47.0 (dropped starting v0.48.0 - see
+// resvgWindowsVersion); linux/arm64 has never had one and is expected to
+// have resvg installed manually and on PATH.
 func resvgAsset(version string) (url, archiveExt string, err error) {
 	return resvgAssetFor(runtime.GOOS, runtime.GOARCH, version)
 }
@@ -121,6 +122,11 @@ func resvgAssetFor(goos, goarch, version string) (url, archiveExt string, err er
 		default:
 			return "", "", fmt.Errorf("resvg publishes no darwin/%s binary", goarch)
 		}
+	case "windows":
+		if goarch != "amd64" {
+			return "", "", fmt.Errorf("resvg publishes no windows/%s binary", goarch)
+		}
+		name, ext = "resvg-win64.zip", "zip"
 	default:
 		return "", "", fmt.Errorf("resvg publishes no %s binary", goos)
 	}
@@ -134,4 +140,21 @@ func resvgBinName() string {
 		return "resvg.exe"
 	}
 	return "resvg"
+}
+
+// ffmpegWindowsAsset returns the download URL for a Windows ffmpeg+ffprobe
+// build (gyan.dev's "essentials" build - ffmpeg/ffprobe/ffplay only, no
+// extra codec docs, smaller than "full").
+//
+// This is a stable alias, not a version-pinned URL: gyan.dev only keeps
+// dated/versioned package archives (under builds/packages/) for a limited
+// time before removing them, so a hardcoded version number here would
+// eventually 404 (this happened - see git history). The alias always
+// redirects (HTTP 303) to whichever build is current, which Go's
+// http.Client follows automatically. The zip contains ffmpeg.exe/
+// ffprobe.exe under a version-numbered top-level folder, extracted by
+// suffix match (see extractNamedSuffixFromZip) so the exact folder name
+// doesn't matter.
+func ffmpegWindowsAsset() (url string) {
+	return "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 }

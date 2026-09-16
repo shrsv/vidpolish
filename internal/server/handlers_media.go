@@ -5,9 +5,32 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"vidpolish/internal/store"
 )
+
+// mimeByExt is a small, deterministic extension -> Content-Type map for
+// the file types vidpolish ever serves via serveFile. We set this
+// ourselves instead of leaning on Go's mime.TypeByExtension (which
+// ServeContent falls back to automatically): on Windows that function
+// reads the type from the registry (HKEY_CLASSES_ROOT\<ext>) rather than
+// a built-in table, and plenty of real Windows installs have no entry (or
+// the wrong one) for .mp4/.webm, so ServeContent ends up sending no
+// Content-Type at all - and WebView2/Chromium's <video> element just
+// silently refuses to play a response with no Content-Type, which looks
+// exactly like "the preview never loads" with no visible error.
+var mimeByExt = map[string]string{
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+	".mov":  "video/quicktime",
+	".mkv":  "video/x-matroska",
+	".gif":  "image/gif",
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".wav":  "audio/wav",
+}
 
 // handleMedia serves a cell's output video/thumbnail for in-browser
 // playback, with Range support (seeking) via http.ServeContent.
@@ -67,6 +90,9 @@ func serveFile(w http.ResponseWriter, r *http.Request, path string) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	if ct, ok := mimeByExt[strings.ToLower(filepath.Ext(path))]; ok {
+		w.Header().Set("Content-Type", ct)
 	}
 	http.ServeContent(w, r, path, info.ModTime(), f)
 }

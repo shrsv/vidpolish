@@ -46,6 +46,15 @@ export const api = {
     });
   },
 
+  // uploadSourceFromPath is uploadSource's counterpart for the Wails GUI
+  // (see SourceDropzone.jsx): reads the video directly off disk by
+  // absolute path via the Go backend, instead of a browser File object
+  // read over the request body. Only meant to be called with a path that
+  // came from window.go.main.App.PickVideoFile or window.runtime.OnFileDrop
+  // - a WebView2-hosted page's own File objects can come back unreadable
+  // (see internal/server/handlers_run.go's writeSourceVideo doc comment).
+  uploadSourceFromPath: (cellId, path) => request('POST', `/api/cells/${cellId}/source-path`, { path }),
+
   subscribeCellEvents: (cellId, onMessage) => {
     const es = new EventSource(`/api/cells/${cellId}/events`);
     es.onmessage = (e) => {
@@ -95,8 +104,15 @@ export const api = {
     return () => es.close();
   },
 
+  // listTools also reports live progress for anything downloading right
+  // now (see the Downloading/Written/Total/Log fields) - poll it while any
+  // row is downloading instead of a separate events subscription, so
+  // progress survives navigating away and back (the state lives on the
+  // server, not in this tab's component tree).
   listTools: () => request('GET', '/api/tools'),
   resolveTool: (name) => request('POST', `/api/tools/${name}/resolve`),
+  redownloadTool: (name) => request('POST', `/api/tools/${name}/redownload`),
+  resolveAllTools: () => request('POST', '/api/tools/resolve-all'),
 
   listCache: () => request('GET', '/api/cache'),
   deleteCacheEntry: (fingerprint) => request('DELETE', `/api/cache/${fingerprint}`),
