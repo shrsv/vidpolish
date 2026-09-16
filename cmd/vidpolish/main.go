@@ -18,6 +18,7 @@ import (
 	"vidpolish/internal/browseropen"
 	"vidpolish/internal/cache"
 	"vidpolish/internal/config"
+	"vidpolish/internal/mcpserver"
 	"vidpolish/internal/pipeline"
 	"vidpolish/internal/server"
 	"vidpolish/internal/store"
@@ -54,6 +55,8 @@ func main() {
 		runUpload(os.Args[2:])
 	case "ui":
 		runUI(os.Args[2:])
+	case "mcp":
+		runMCP(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println("vidpolish", version)
 	default:
@@ -73,7 +76,29 @@ Usage:
   vidpolish youtube login
   vidpolish upload <video.mp4> [flags]
   vidpolish ui [--port 7890] [--no-open]
+  vidpolish mcp
   vidpolish version`)
+}
+
+// runMCP serves vidpolish's pipeline, project/cell notebook, YouTube
+// upload, and config/cache/tool-status surfaces as an MCP server over
+// stdio, so an MCP client (e.g. Claude Code/Desktop) can drive vidpolish
+// directly. See internal/mcpserver for the tool implementations.
+func runMCP(_ []string) {
+	db, err := store.Open()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	if err := mcpserver.Run(ctx, db, version); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 }
 
 func runUI(args []string) {

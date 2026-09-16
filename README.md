@@ -23,6 +23,7 @@
 | Understand how caching avoids repeat work | [How caching works](#how-caching-works) |
 | Upload a finished video straight to YouTube | [YouTube upload](#youtube-upload) |
 | Use the local Projects web UI | [Local UI](#local-ui) |
+| Let Claude or another MCP client drive vidpolish directly | [MCP server](#mcp-server) |
 | Find my way around the source code | [Project layout](#project-layout) |
 | See what's done and what's planned | [Status and roadmap](#status-and-roadmap) |
 | Build from source or contribute | [Development](#development) |
@@ -675,6 +676,7 @@ internal/binmgr        resolves/downloads deep-filter, auto-editor, resvg, and t
 internal/browseropen   opens a URL in the default browser
 internal/cache         the ~/.vidpolish/cache artifact cache
 internal/config        ~/.vidpolish/config.toml load/init/save
+internal/mcpserver     the `vidpolish mcp` MCP server (stdio) tool handlers
 internal/pipeline      the split / denoise / remux / auto-edit stages
 internal/server        the embedded local UI's HTTP API and static frontend
 internal/store         SQLite-backed Projects/Cells storage (~/.vidpolish/vidpolish.db)
@@ -697,6 +699,9 @@ vidpolish currently covers:
   auto-generated thumbnail.
 - A local **"Projects" UI** (`vidpolish ui`), built on the same library,
   with config/tools/cache management panels.
+- An **MCP server** (`vidpolish mcp`), exposing the same pipeline,
+  Projects/Cells model, YouTube upload, and config/cache/tool status as
+  MCP tools for Claude or any other MCP client.
 
 ## Development
 
@@ -705,6 +710,63 @@ go build ./...
 go vet ./...
 go test ./...
 ```
+
+## MCP server
+
+`vidpolish mcp` runs vidpolish as an [MCP](https://modelcontextprotocol.io)
+server over stdio, so Claude Code, Claude Desktop, or any other MCP client
+can drive vidpolish directly — processing a video, managing Projects/Cells,
+uploading to YouTube, and checking config/cache/tool status — without
+shelling out to the CLI or scraping the web UI. It works headless: unlike
+`vidpolish ui`, no local web server needs to be running.
+
+Add it to your MCP client's config, for example Claude Code's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "vidpolish": {
+      "command": "vidpolish",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+or register it directly with the Claude Code CLI:
+
+```sh
+claude mcp add vidpolish -- vidpolish mcp
+```
+
+It exposes the same capabilities as the CLI and web UI, as MCP tools:
+
+- **Pipeline**: `vidpolish_process` (split/denoise/cut/resize a raw
+  recording), `vidpolish_probe` (resolution/duration/bitrate/size).
+- **Projects/Cells** (the same notebook model as the local UI):
+  `vidpolish_list_projects`, `vidpolish_create_project`,
+  `vidpolish_get_project`, `vidpolish_delete_project`,
+  `vidpolish_set_source`, `vidpolish_create_cell`, `vidpolish_update_cell`,
+  `vidpolish_get_cell`, `vidpolish_delete_cell`, `vidpolish_reorder_cells`,
+  `vidpolish_run_cell`, `vidpolish_cell_info`, `vidpolish_export_gif`.
+- **YouTube**: `vidpolish_youtube_login` / `vidpolish_youtube_login_status`
+  (one-time interactive browser OAuth login), `vidpolish_upload_youtube`.
+- **Config/ops**: `vidpolish_get_config` / `vidpolish_set_config` (YouTube
+  client secret and refresh token are always redacted to a short preview
+  in tool output, never returned in full), `vidpolish_list_config_backups`,
+  `vidpolish_restore_config_backup`, `vidpolish_list_tools`,
+  `vidpolish_resolve_tool`, `vidpolish_list_cache`,
+  `vidpolish_delete_cache_entry`, `vidpolish_clean_cache`.
+
+Long-running tools (`vidpolish_process`, `vidpolish_run_cell`,
+`vidpolish_upload_youtube`) report progress via MCP progress notifications
+if the client requests them. `vidpolish_youtube_login` opens a browser for
+a human to approve; it isn't a fully headless tool.
+
+Since `vidpolish ui` and `vidpolish mcp` are separate processes that can
+both be running at once, they share the same `~/.vidpolish` project data
+and SQLite database, so a project created from one is visible in the
+other.
 
 ## License
 
