@@ -35,6 +35,12 @@ type Options struct {
 	Height      int
 	BitrateKbps int
 
+	// Denoise runs the audio through DeepFilterNet before cutting silence.
+	// Callers must set this explicitly (the zero value is "off"); off
+	// skips the stage entirely and cuts silence directly on the split
+	// audio instead of the denoised copy.
+	Denoise bool
+
 	NoCache bool // if true, ignore existing cache entries and recompute everything
 
 	// Log, if set, receives stage-progress messages instead of them being
@@ -69,25 +75,33 @@ type stageBound struct {
 	label      string
 }
 
-// stageBoundsFor returns the stage plan for a run: 4 stages normally, plus
-// a 5th "resizing" stage (shrinking auto-editor's share to make room) when
-// a resize/bitrate pass is actually needed.
-func stageBoundsFor(needsResize bool) []stageBound {
-	if !needsResize {
-		return []stageBound{
+// stageBoundsFor returns the stage plan for a run, omitting the denoise
+// stage entirely when it's disabled (and giving auto-editor the reclaimed
+// share), plus a trailing "resizing" stage (shrinking auto-editor's share
+// to make room) when a resize/bitrate pass is actually needed.
+func stageBoundsFor(denoise, needsResize bool) []stageBound {
+	var bounds []stageBound
+	if denoise {
+		bounds = []stageBound{
 			{0.00, 0.08, "splitting video and audio"},
 			{0.08, 0.75, "denoising audio"},
-			{0.75, 0.82, "remuxing cleaned audio with video"},
+			{0.75, 0.82, "remuxing audio with video"},
 			{0.82, 1.00, "cutting silence with auto-editor"},
 		}
+	} else {
+		bounds = []stageBound{
+			{0.00, 0.20, "splitting video and audio"},
+			{0.20, 0.35, "remuxing audio with video"},
+			{0.35, 1.00, "cutting silence with auto-editor"},
+		}
 	}
-	return []stageBound{
-		{0.00, 0.08, "splitting video and audio"},
-		{0.08, 0.75, "denoising audio"},
-		{0.75, 0.82, "remuxing cleaned audio with video"},
-		{0.82, 0.94, "cutting silence with auto-editor"},
-		{0.94, 1.00, "resizing / re-encoding video"},
+	if !needsResize {
+		return bounds
 	}
+	last := &bounds[len(bounds)-1]
+	resizeStart := last.start + (last.end-last.start)*0.85
+	last.end = resizeStart
+	return append(bounds, stageBound{resizeStart, 1.00, "resizing / re-encoding video"})
 }
 
 // newStageReporter builds a reporter for stage i (0-indexed into bounds),
@@ -157,7 +171,6 @@ func Process(opts Options) (string, error) {
 	videoOnly := filepath.Join(dir, "video.mp4")
 	rawAudio := filepath.Join(dir, "audio.wav")
 	denoisedDir := filepath.Join(dir, "denoised")
-	remuxed := filepath.Join(dir, "remuxed.mp4")
 
 	// The split/denoise/remux stage is keyed only by the source
 	// fingerprint (not by margin/speed), so concurrent Process calls on
@@ -168,11 +181,12 @@ func Process(opts Options) (string, error) {
 	// parallel variants proceed concurrently once the shared stage is
 	// ready.
 	needsResize := opts.Width > 0 || opts.Height > 0 || opts.BitrateKbps > 0
-	bounds := stageBoundsFor(needsResize)
+	bounds := stageBoundsFor(opts.Denoise, needsResize)
+	stage := 0
 
 	unlock := cache.Lock(fp)
 	if opts.NoCache || !exists(videoOnly) || !exists(rawAudio) {
-		r := opts.newStageReporter(start, bounds, 0)
+		r := opts.newStageReporter(start, bounds, stage)
 		r.report(0)
 		if err := splitVideoAudio(ffmpegPath, opts.Input, videoOnly, rawAudio, duration, r.report); err != nil {
 			unlock()
@@ -181,50 +195,68 @@ func Process(opts Options) (string, error) {
 	} else {
 		opts.logf("==> using cached split video/audio")
 	}
+	stage++
 
-	var denoisedAudio string
-	if opts.NoCache || !dirHasWav(denoisedDir) {
-		r := opts.newStageReporter(start, bounds, 1)
-		r.report(0)
-		denoisedAudio, err = denoise(deepFilterPath, rawAudio, denoisedDir, duration, r.report)
-		if err != nil {
-			unlock()
-			return "", err
+	audioForRemux := rawAudio
+	if opts.Denoise {
+		var denoisedAudio string
+		if opts.NoCache || !dirHasWav(denoisedDir) {
+			r := opts.newStageReporter(start, bounds, stage)
+			r.report(0)
+			denoisedAudio, err = denoise(deepFilterPath, rawAudio, denoisedDir, duration, r.report)
+			if err != nil {
+				unlock()
+				return "", err
+			}
+		} else {
+			opts.logf("==> using cached denoised audio")
+			denoisedAudio, err = firstWavIn(denoisedDir)
+			if err != nil {
+				unlock()
+				return "", err
+			}
 		}
-	} else {
-		opts.logf("==> using cached denoised audio")
-		denoisedAudio, err = firstWavIn(denoisedDir)
-		if err != nil {
-			unlock()
-			return "", err
-		}
+		audioForRemux = denoisedAudio
+		stage++
 	}
 
+	// remuxed's filename encodes whether denoising ran, since the same
+	// fingerprint's cache dir would otherwise mix a denoised and a raw
+	// remux under one name across runs with the toggle flipped.
+	remuxed := filepath.Join(dir, "remuxed.mp4")
+	if !opts.Denoise {
+		remuxed = filepath.Join(dir, "remuxed-nodenoise.mp4")
+	}
 	if opts.NoCache || !exists(remuxed) {
-		r := opts.newStageReporter(start, bounds, 2)
+		r := opts.newStageReporter(start, bounds, stage)
 		r.report(0)
-		if err := muxVideoAudio(ffmpegPath, videoOnly, denoisedAudio, remuxed, duration, r.report); err != nil {
+		if err := muxVideoAudio(ffmpegPath, videoOnly, audioForRemux, remuxed, duration, r.report); err != nil {
 			unlock()
 			return "", err
 		}
 	} else {
 		opts.logf("==> using cached remux")
 	}
+	stage++
 	unlock()
 
 	if err := cache.Touch(dir); err != nil {
 		fmt.Fprintf(os.Stderr, "vidpolish: cache touch warning: %v\n", err)
 	}
 
-	editedKey := cache.ParamsKey(
-		"margin="+opts.Margin,
-		"speed="+strconv.FormatFloat(opts.Speed, 'f', -1, 64),
-		"edit="+editMethod,
-	)
+	editedKeyParts := []string{
+		"margin=" + opts.Margin,
+		"speed=" + strconv.FormatFloat(opts.Speed, 'f', -1, 64),
+		"edit=" + editMethod,
+	}
+	if !opts.Denoise {
+		editedKeyParts = append(editedKeyParts, "denoise=off")
+	}
+	editedKey := cache.ParamsKey(editedKeyParts...)
 	edited := filepath.Join(dir, "edited-"+editedKey+".mp4")
 
 	if opts.NoCache || !exists(edited) {
-		r := opts.newStageReporter(start, bounds, 3)
+		r := opts.newStageReporter(start, bounds, stage)
 		r.report(0)
 		if err := autoEdit(autoEditorPath, remuxed, edited, opts.Margin, opts.Speed, r.report); err != nil {
 			return "", err
@@ -232,6 +264,7 @@ func Process(opts Options) (string, error) {
 	} else {
 		opts.logf("==> using cached auto-edit result")
 	}
+	stage++
 
 	// Resizing/re-encoding is a separate, optional pass kept out of
 	// auto-editor's own output so leaving Width/Height/BitrateKbps unset
@@ -247,7 +280,7 @@ func Process(opts Options) (string, error) {
 		)
 		final = filepath.Join(dir, "final-"+resizeKey+".mp4")
 		if opts.NoCache || !exists(final) {
-			r := opts.newStageReporter(start, bounds, 4)
+			r := opts.newStageReporter(start, bounds, stage)
 			r.report(0)
 			editedDuration, _ := probeDuration(ffprobePath, edited)
 			if err := resizeVideo(ffmpegPath, edited, final, opts.Width, opts.Height, opts.BitrateKbps, editedDuration, r.report); err != nil {

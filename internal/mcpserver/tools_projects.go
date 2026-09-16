@@ -439,6 +439,7 @@ func (s *Server) runEditCell(cell *store.Cell, log func(string)) error {
 		Width:       params.Width,
 		Height:      params.Height,
 		BitrateKbps: params.BitrateKbps,
+		Denoise:     !params.SkipDenoise,
 		Log:         log,
 	})
 	if err != nil {

@@ -182,6 +182,7 @@ func runProcess(args []string) {
 		Width:       *width,
 		Height:      *height,
 		BitrateKbps: *bitrate,
+		Denoise:     true,
 		NoCache:     *noCache,
 	})
 	if err != nil {

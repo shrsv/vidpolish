@@ -9,7 +9,7 @@ import (
 func TestStageReporterZeroOverallShowsEstimating(t *testing.T) {
 	var got string
 	opts := Options{Log: func(s string) { got = s }}
-	r := opts.newStageReporter(time.Now(), stageBoundsFor(false), 0) // split: bounds 0.00-0.08
+	r := opts.newStageReporter(time.Now(), stageBoundsFor(true, false), 0) // split: bounds 0.00-0.08
 	r.report(0)
 	if !strings.Contains(got, "0%") || !strings.Contains(got, "estimating") {
 		t.Fatalf("report at local 0 = %q", got)
@@ -23,7 +23,7 @@ func TestStageReporterComputesOverallPercentAndETA(t *testing.T) {
 	var got string
 	opts := Options{Log: func(s string) { got = s }}
 	start := time.Now().Add(-10 * time.Second)                  // pretend 10s have elapsed
-	r := opts.newStageReporter(start, stageBoundsFor(false), 1) // denoise: bounds 0.08-0.75
+	r := opts.newStageReporter(start, stageBoundsFor(true, false), 1) // denoise: bounds 0.08-0.75
 	r.report(0.5)                                               // local 50% through denoise -> overall 0.08+0.5*0.67 = 0.415
 	if !strings.Contains(got, "step 2/4") {
 		t.Fatalf("report = %q, want step 2/4", got)
@@ -37,7 +37,7 @@ func TestStageReporterOverallProgressesMonotonically(t *testing.T) {
 	var messages []string
 	opts := Options{Log: func(s string) { messages = append(messages, s) }}
 	start := time.Now()
-	r := opts.newStageReporter(start, stageBoundsFor(false), 1) // denoise
+	r := opts.newStageReporter(start, stageBoundsFor(true, false), 1) // denoise
 	r.report(0.1)
 	r.report(0.5)
 	r.report(0.9)
@@ -56,7 +56,7 @@ func TestStageReporterOverallProgressesMonotonically(t *testing.T) {
 func TestStageReporterFallsBackToStdoutWithoutLogCallback(t *testing.T) {
 	// Just confirm it doesn't panic when Log is nil (falls back to fmt.Println).
 	opts := Options{}
-	r := opts.newStageReporter(time.Now(), stageBoundsFor(false), 2)
+	r := opts.newStageReporter(time.Now(), stageBoundsFor(true, false), 2)
 	r.report(0.25)
 }
 

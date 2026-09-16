@@ -19,6 +19,10 @@ import {
   CircleQuestionMark,
   FileImage,
   FileText,
+  Scissors,
+  Wind,
+  Maximize2,
+  Gauge,
 } from 'lucide-preact';
 import { api } from '../api.js';
 import { navigate, paths } from '../router.js';
@@ -436,6 +440,7 @@ function EditParamsForm({ cell, onChanged }) {
   const [height, setHeight] = useState(p.height ? String(p.height) : '');
   const [bitrate, setBitrate] = useState(p.bitrateKbps ? String(p.bitrateKbps) : '');
   const [lockAspect, setLockAspect] = useState(p.lockAspect !== false);
+  const [denoise, setDenoise] = useState(!p.skipDenoise);
   const [info, setInfo] = useState(null);
   const [showMarginHelp, setShowMarginHelp] = useState(false);
   const disabled = cell.status !== 'idle';
@@ -460,10 +465,17 @@ function EditParamsForm({ cell, onChanged }) {
           height: Number(height) || 0,
           bitrateKbps: Number(bitrate) || 0,
           lockAspect,
+          skipDenoise: !denoise,
           ...overrides,
         },
       })
       .then(onChanged);
+
+  const toggleDenoise = () => {
+    const next = !denoise;
+    setDenoise(next);
+    save({ skipDenoise: !next });
+  };
 
   const onWidthChange = (v) => {
     setWidth(v);
@@ -509,68 +521,93 @@ function EditParamsForm({ cell, onChanged }) {
   });
 
   return (
-    <div class="space-y-3">
-      <div class="flex gap-4">
-        <div class="flex-1">
-          <label class="label flex items-center gap-1">
-            Margin
-            <button
-              type="button"
-              class="text-slate-500 hover:text-cyan-400 transition-colors"
-              onClick={() => setShowMarginHelp((s) => !s)}
-              title="What does margin do?"
-            >
-              <CircleQuestionMark size={12} />
-            </button>
-          </label>
-          <input class="input" value={margin} disabled={disabled} onInput={(e) => setMargin(e.currentTarget.value)} onBlur={() => save()} />
-          {showMarginHelp && (
-            <p class="text-[11px] text-slate-500 mt-1 leading-snug">
-              How much extra time to keep on either side of detected speech before cutting, so words
-              don't get clipped at the start/end of a cut. <code class="text-slate-400">0.2s</code>{' '}
-              (default) is a light trim; raise it (e.g. <code class="text-slate-400">0.3s</code>–
-              <code class="text-slate-400">0.5s</code>) if cuts feel abrupt, lower it for a tighter edit.
-            </p>
-          )}
-        </div>
-        <div class="flex-1">
-          <label class="label">Speed</label>
-          <input
-            class="input"
-            type="number"
-            step="0.05"
-            min="0.5"
-            max="4"
-            value={speed}
-            disabled={disabled}
-            onInput={(e) => setSpeed(e.currentTarget.value)}
-            onBlur={() => save()}
-          />
-          <div class="flex items-center gap-1 mt-1.5">
-            {[1, 1.25, 1.5, 1.75, 2].map((preset) => (
+    <div class="space-y-4">
+      <div class="form-section">
+        <h4 class="form-section-title"><Scissors size={12} /> Trim &amp; speed</h4>
+        <div class="flex gap-4">
+          <div class="flex-1">
+            <label class="label flex items-center gap-1">
+              Margin
               <button
-                key={preset}
                 type="button"
-                class={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                  Number(speed) === preset
-                    ? 'border-cyan-600 bg-cyan-950 text-cyan-300'
-                    : 'border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-700'
-                }`}
-                disabled={disabled}
-                onClick={() => {
-                  setSpeed(preset);
-                  save({ speed: preset });
-                }}
+                class="text-slate-500 hover:text-cyan-400 transition-colors"
+                onClick={() => setShowMarginHelp((s) => !s)}
+                title="What does margin do?"
               >
-                {preset}x
+                <CircleQuestionMark size={12} />
               </button>
-            ))}
+            </label>
+            <input class="input" value={margin} disabled={disabled} onInput={(e) => setMargin(e.currentTarget.value)} onBlur={() => save()} />
+            {showMarginHelp && (
+              <p class="text-[11px] text-slate-500 mt-1 leading-snug">
+                How much extra time to keep on either side of detected speech before cutting, so words
+                don't get clipped at the start/end of a cut. <code class="text-slate-400">0.2s</code>{' '}
+                (default) is a light trim; raise it (e.g. <code class="text-slate-400">0.3s</code>–
+                <code class="text-slate-400">0.5s</code>) if cuts feel abrupt, lower it for a tighter edit.
+              </p>
+            )}
+          </div>
+          <div class="flex-1">
+            <label class="label">Speed</label>
+            <input
+              class="input"
+              type="number"
+              step="0.05"
+              min="0.5"
+              max="4"
+              value={speed}
+              disabled={disabled}
+              onInput={(e) => setSpeed(e.currentTarget.value)}
+              onBlur={() => save()}
+            />
+            <div class="flex items-center gap-1 mt-1.5">
+              {[1, 1.25, 1.5, 1.75, 2].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  class={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    Number(speed) === preset
+                      ? 'border-cyan-600 bg-cyan-950 text-cyan-300'
+                      : 'border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-700'
+                  }`}
+                  disabled={disabled}
+                  onClick={() => {
+                    setSpeed(preset);
+                    save({ speed: preset });
+                  }}
+                >
+                  {preset}x
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
-      <div>
-        <label class="label">Resize (blank = keep original)</label>
+      <div class="form-section">
+        <h4 class="form-section-title"><Wind size={12} /> Audio</h4>
+        <label class="flex items-start justify-between gap-3">
+          <span>
+            <span class="block text-sm text-slate-200">Denoise with DeepFilterNet</span>
+            <span class="block text-xs text-slate-500 mt-0.5">
+              Cleans background noise/hiss before cutting silence. Turn off for already-clean audio to skip the slowest stage.
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={denoise}
+            disabled={disabled}
+            onClick={toggleDenoise}
+            class="switch mt-0.5"
+          >
+            <span class="switch-thumb" />
+          </button>
+        </label>
+      </div>
+
+      <div class="form-section">
+        <h4 class="form-section-title"><Maximize2 size={12} /> Resize</h4>
         <div class="flex items-center gap-2">
           <input
             class="input flex-1"
@@ -607,7 +644,7 @@ function EditParamsForm({ cell, onChanged }) {
             onBlur={() => save()}
           />
         </div>
-        <div class="flex items-center gap-1.5 mt-1.5">
+        <div class="flex items-center gap-1.5">
           <span class="text-[11px] text-slate-500 mr-0.5">Scale:</span>
           {[25, 50, 75, 100].map((pct) => (
             <button
@@ -638,13 +675,13 @@ function EditParamsForm({ cell, onChanged }) {
         </div>
       </div>
 
-      <div>
-        <label class="label">Bitrate, kbps (blank = keep original)</label>
+      <div class="form-section">
+        <h4 class="form-section-title"><Gauge size={12} /> Bitrate</h4>
         <input
           class="input"
           type="number"
           min="1"
-          placeholder={sourceInfo?.bitrateKbps ? `${sourceInfo.bitrateKbps} (original)` : 'original'}
+          placeholder={sourceInfo?.bitrateKbps ? `${sourceInfo.bitrateKbps} kbps (original)` : 'kbps, blank = original'}
           value={bitrate}
           disabled={disabled}
           onInput={(e) => setBitrate(e.currentTarget.value)}
@@ -653,7 +690,7 @@ function EditParamsForm({ cell, onChanged }) {
       </div>
 
       {!disabled && estimatedBytes != null && (
-        <p class="text-xs text-slate-500" title="Approximate — based on the current margin/speed/resize/bitrate settings and this source's typical bitrate; actual size depends on scene complexity and how much silence auto-editor cuts.">
+        <p class="text-xs text-slate-500 border-t border-slate-800/80 pt-3" title="Approximate — based on the current margin/speed/resize/bitrate settings and this source's typical bitrate; actual size depends on scene complexity and how much silence auto-editor cuts.">
           Estimated output: ~{formatSize(estimatedBytes)} (approx)
         </p>
       )}

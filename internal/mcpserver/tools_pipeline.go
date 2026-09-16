@@ -51,6 +51,7 @@ func (s *Server) addPipelineTools(srv *mcp.Server) {
 			Width:       args.Width,
 			Height:      args.Height,
 			BitrateKbps: args.BitrateKbps,
+			Denoise:     true,
 			NoCache:     args.NoCache,
 			Log:         progressLogger(ctx, req),
 		})

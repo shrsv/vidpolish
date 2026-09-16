@@ -249,6 +249,7 @@ func (s *Server) runEditCell(cell *store.Cell) error {
 		Width:       params.Width,
 		Height:      params.Height,
 		BitrateKbps: params.BitrateKbps,
+		Denoise:     !params.SkipDenoise,
 		Log:         s.log(cell.ID),
 	})
 	if err != nil {

@@ -14,6 +14,12 @@ type EditParams struct {
 	Height      int  `json:"height"`
 	BitrateKbps int  `json:"bitrateKbps"`
 	LockAspect  bool `json:"lockAspect"`
+
+	// SkipDenoise disables the DeepFilterNet denoise stage, cutting
+	// silence directly on the split audio instead. Named as a negative so
+	// existing cells' params (saved before this field existed) default to
+	// false, i.e. keep denoising on — the long-standing behavior.
+	SkipDenoise bool `json:"skipDenoise"`
 }
 
 // TextParams is the params_json shape for a 'text' cell.
