@@ -25,6 +25,12 @@ export const api = {
   reorderCells: (projectId, kind, orderedCellIds) =>
     request('POST', `/api/projects/${projectId}/reorder`, { kind, orderedCellIds }),
 
+  listProfiles: () => request('GET', '/api/profiles'),
+  saveProfile: (name, cellId) => request('POST', '/api/profiles', { name, cellId }),
+  updateProfile: (id, body) => request('PATCH', `/api/profiles/${id}`, body),
+  deleteProfile: (id) => request('DELETE', `/api/profiles/${id}`),
+  applyProfile: (cellId, profileId) => request('POST', `/api/cells/${cellId}/apply-profile`, { profileId }),
+
   uploadSource: async (cellId, file, onProgress) => {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();

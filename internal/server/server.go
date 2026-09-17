@@ -62,6 +62,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/cells/{id}/export-gif", s.handleExportGif)
 	s.mux.HandleFunc("GET /api/cells/{id}/events", s.handleCellEvents)
 	s.mux.HandleFunc("DELETE /api/cells/{id}", s.handleDeleteCell)
+	s.mux.HandleFunc("POST /api/cells/{id}/apply-profile", s.handleApplyProfile)
+
+	s.mux.HandleFunc("GET /api/profiles", s.handleListProfiles)
+	s.mux.HandleFunc("POST /api/profiles", s.handleCreateProfile)
+	s.mux.HandleFunc("PATCH /api/profiles/{id}", s.handlePatchProfile)
+	s.mux.HandleFunc("DELETE /api/profiles/{id}", s.handleDeleteProfile)
 
 	s.mux.HandleFunc("GET /api/media/{id}", s.handleMedia)
 	s.mux.HandleFunc("GET /api/cells/{id}/thumbnail", s.handleCellThumbnail)

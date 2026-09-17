@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS cells (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cells_project ON cells(project_id);
+
+CREATE TABLE IF NOT EXISTS profiles (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE,
+	params_json TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 `
 
 // Path returns the path to ~/.vidpolish/vidpolish.db.

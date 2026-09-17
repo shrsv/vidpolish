@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -49,6 +50,8 @@ func main() {
 		runCache(os.Args[2:])
 	case "config":
 		runConfig(os.Args[2:])
+	case "profile":
+		runProfile(os.Args[2:])
 	case "youtube":
 		runYouTube(os.Args[2:])
 	case "upload":
@@ -73,6 +76,9 @@ Usage:
   vidpolish deps
   vidpolish cache clean
   vidpolish config init
+  vidpolish profile list
+  vidpolish profile save <name> [flags]
+  vidpolish profile delete <name>
   vidpolish youtube login
   vidpolish upload <video.mp4> [flags]
   vidpolish ui [--port 7890] [--no-open]
@@ -149,6 +155,7 @@ func runProcess(args []string) {
 	width := fs.Int("width", 0, "resize output to this width in pixels (default: keep original); pair with --height or omit it to preserve aspect ratio")
 	height := fs.Int("height", 0, "resize output to this height in pixels (default: keep original); pair with --width or omit it to preserve aspect ratio")
 	bitrate := fs.Int("bitrate", 0, "target video bitrate in kbps (default: keep original quality, no re-encode for bitrate)")
+	profileName := fs.String("profile", "", "apply a saved edit profile (see 'vidpolish profile list'); mutually exclusive with --margin/--speed/--width/--height/--bitrate")
 	noCache := fs.Bool("no-cache", false, "ignore cached intermediate artifacts and recompute everything")
 	upload := fs.Bool("upload", false, "upload the polished result to YouTube after processing")
 	title := fs.String("title", "", "YouTube title if --upload is set (default: input filename)")
@@ -174,7 +181,7 @@ func runProcess(args []string) {
 		os.Exit(1)
 	}
 
-	out, err := pipeline.Process(pipeline.Options{
+	opts := pipeline.Options{
 		Input:       fs.Arg(0),
 		OutputDir:   *outputDir,
 		Margin:      *margin,
@@ -184,7 +191,29 @@ func runProcess(args []string) {
 		BitrateKbps: *bitrate,
 		Denoise:     true,
 		NoCache:     *noCache,
-	})
+	}
+
+	if *profileName != "" {
+		explicit := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+		if explicit["margin"] || explicit["speed"] || explicit["width"] || explicit["height"] || explicit["bitrate"] {
+			fmt.Fprintln(os.Stderr, "error: --profile is mutually exclusive with --margin/--speed/--width/--height/--bitrate")
+			os.Exit(1)
+		}
+		ep, err := resolveProfileFor(*profileName, fs.Arg(0))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		opts.Margin = ep.Margin
+		opts.Speed = ep.Speed
+		opts.Width = ep.Width
+		opts.Height = ep.Height
+		opts.BitrateKbps = ep.BitrateKbps
+		opts.Denoise = !ep.SkipDenoise
+	}
+
+	out, err := pipeline.Process(opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -200,6 +229,120 @@ func runProcess(args []string) {
 			ThumbnailPath: *thumbnailPath,
 			NoThumbnail:   *noThumbnail,
 		})
+	}
+}
+
+// resolveProfileFor looks up a saved profile by name and resolves its scale
+// percentage against inputPath's own probed resolution, for use by
+// `vidpolish process --profile`, which has no cell/project source to
+// resolve against.
+func resolveProfileFor(name, inputPath string) (server.EditParams, error) {
+	db, err := store.Open()
+	if err != nil {
+		return server.EditParams{}, err
+	}
+	defer db.Close()
+
+	p, err := db.GetProfileByName(name)
+	if err != nil {
+		return server.EditParams{}, err
+	}
+	var pp server.ProfileParams
+	if err := json.Unmarshal([]byte(p.ParamsJSON), &pp); err != nil {
+		return server.EditParams{}, fmt.Errorf("parsing profile params: %w", err)
+	}
+
+	var srcW, srcH int
+	if ffprobePath, err := binmgr.Resolve(binmgr.FFprobe); err == nil {
+		if info, err := pipeline.ProbeVideoInfo(ffprobePath, inputPath); err == nil {
+			srcW, srcH = info.Width, info.Height
+		}
+	}
+	return server.ResolveProfile(pp, srcW, srcH), nil
+}
+
+func runProfile(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: vidpolish profile list | save <name> [flags] | delete <name>")
+		os.Exit(1)
+	}
+
+	db, err := store.Open()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	switch args[0] {
+	case "list":
+		profiles, err := db.ListProfiles()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		if len(profiles) == 0 {
+			fmt.Println("no saved profiles")
+			return
+		}
+		for _, p := range profiles {
+			var pp server.ProfileParams
+			json.Unmarshal([]byte(p.ParamsJSON), &pp)
+			fmt.Printf("%-20s margin=%s speed=%g scalePct=%g bitrateKbps=%d lockAspect=%v skipDenoise=%v\n",
+				p.Name, pp.Margin, pp.Speed, pp.ScalePct, pp.BitrateKbps, pp.LockAspect, pp.SkipDenoise)
+		}
+
+	case "save":
+		fs := flag.NewFlagSet("profile save", flag.ExitOnError)
+		margin := fs.String("margin", "0.2s", "auto-editor margin around kept speech (e.g. 0.2s, 0.3s)")
+		speed := fs.Float64("speed", 1.0, "playback speed multiplier for kept/spoken segments")
+		scalePct := fs.Float64("scale-pct", 0, "resize scale as a percentage of the source resolution (0 or >=100 = keep original)")
+		bitrate := fs.Int("bitrate", 0, "target video bitrate in kbps (0 = keep original)")
+		lockAspect := fs.Bool("lock-aspect", false, "remember the aspect-lock toggle as on")
+		noDenoise := fs.Bool("no-denoise", false, "skip the DeepFilterNet denoise stage")
+		fs.Parse(reorderFlags(args[1:]))
+		if fs.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "usage: vidpolish profile save <name> [flags]")
+			os.Exit(1)
+		}
+		pp := server.ProfileParams{
+			Margin:      *margin,
+			Speed:       *speed,
+			ScalePct:    *scalePct,
+			BitrateKbps: *bitrate,
+			LockAspect:  *lockAspect,
+			SkipDenoise: *noDenoise,
+		}
+		paramsJSON, err := json.Marshal(pp)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		if _, err := db.CreateProfile(fs.Arg(0), string(paramsJSON)); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		fmt.Println("saved profile", fs.Arg(0))
+
+	case "delete":
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: vidpolish profile delete <name>")
+			os.Exit(1)
+		}
+		p, err := db.GetProfileByName(args[1])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		if err := db.DeleteProfile(p.ID); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		fmt.Println("deleted profile", args[1])
+
+	default:
+		fmt.Fprintln(os.Stderr, "usage: vidpolish profile list | save <name> [flags] | delete <name>")
+		os.Exit(1)
 	}
 }
 
@@ -411,6 +554,8 @@ func reorderFlags(args []string) []string {
 		"-upload": true, "--upload": true,
 		"-no-wait": true, "--no-wait": true,
 		"-no-thumbnail": true, "--no-thumbnail": true,
+		"-lock-aspect": true, "--lock-aspect": true,
+		"-no-denoise": true, "--no-denoise": true,
 	}
 	valueFlags := map[string]bool{
 		"-output-dir": true, "--output-dir": true,
@@ -419,6 +564,8 @@ func reorderFlags(args []string) []string {
 		"-width": true, "--width": true,
 		"-height": true, "--height": true,
 		"-bitrate": true, "--bitrate": true,
+		"-profile": true, "--profile": true,
+		"-scale-pct": true, "--scale-pct": true,
 		"-title": true, "--title": true,
 		"-privacy": true, "--privacy": true,
 		"-language": true, "--language": true,

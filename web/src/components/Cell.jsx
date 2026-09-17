@@ -23,6 +23,10 @@ import {
   Wind,
   Maximize2,
   Gauge,
+  Bookmark,
+  Save,
+  MoreHorizontal,
+  ChevronLeft,
 } from 'lucide-preact';
 import { api } from '../api.js';
 import { navigate, paths } from '../router.js';
@@ -190,6 +194,7 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
             </button>
           )}
           {cell.kind === 'edit' && cell.mediaUrl && <GifExportButton cell={cell} />}
+          {cell.kind === 'edit' && <ProfileMenuButton cell={cell} onChanged={onChanged} />}
           <button class="btn-danger" onClick={remove} title="Delete">
             <Trash2 size={15} />
           </button>
@@ -198,7 +203,7 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
 
       {!collapsed && (
         <>
-          {cell.kind === 'edit' && <EditParamsForm cell={cell} onChanged={onChanged} />}
+          {cell.kind === 'edit' && <EditParamsForm key={cell.updatedAt} cell={cell} onChanged={onChanged} />}
           {cell.kind === 'upload' && <UploadParamsForm cell={cell} editCells={editCells} onChanged={onChanged} />}
           {cell.kind === 'text' && <TextCellForm cell={cell} project={project} onChanged={onChanged} />}
 
@@ -420,6 +425,310 @@ function GifExportButton({ cell }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ProfileMenuButton is an edit cell's "..." overflow menu, holding the two
+// profile actions (save the cell's current params as a new named profile;
+// apply a saved one). Kept out of the main toolbar row since these are
+// occasional actions, not everyday ones like Run/Download.
+function ProfileMenuButton({ cell, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState('menu'); // 'menu' | 'save' | 'apply'
+  const boxRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickAway = (e) => {
+      if (!boxRef.current?.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClickAway);
+    return () => document.removeEventListener('mousedown', onClickAway);
+  }, [open]);
+
+  const close = () => {
+    setOpen(false);
+    setView('menu');
+  };
+
+  return (
+    <div class="relative" ref={boxRef}>
+      <button
+        type="button"
+        class="btn-secondary"
+        onClick={() => setOpen((o) => !o)}
+        title="Profile actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <MoreHorizontal size={15} />
+      </button>
+      {open && view === 'menu' && (
+        <div class="absolute top-full right-0 mt-1.5 w-52 rounded-md border border-slate-700 bg-slate-950 p-1 text-xs shadow-xl z-10">
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-300 hover:bg-slate-800 hover:text-cyan-400 transition-colors text-left"
+            onClick={() => setView('save')}
+          >
+            <Save size={14} /> Save as profile
+          </button>
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-300 hover:bg-slate-800 hover:text-cyan-400 transition-colors text-left"
+            onClick={() => setView('apply')}
+          >
+            <Bookmark size={14} /> Apply profile
+          </button>
+        </div>
+      )}
+      {open && view === 'save' && <SaveProfilePopover cell={cell} onBack={() => setView('menu')} onDone={close} />}
+      {open && view === 'apply' && (
+        <ApplyProfilePopover cell={cell} onChanged={onChanged} onBack={() => setView('menu')} onDone={close} />
+      )}
+    </div>
+  );
+}
+
+function PopoverBackHeader({ title, onBack }) {
+  return (
+    <div class="flex items-center gap-1.5">
+      <button type="button" class="text-slate-500 hover:text-slate-300 transition-colors" onClick={onBack} title="Back">
+        <ChevronLeft size={14} />
+      </button>
+      <p class="text-slate-400 font-medium">{title}</p>
+    </div>
+  );
+}
+
+// SaveProfilePopover asks for a name, saves the cell's current params under
+// it, and reports success/failure inline.
+function SaveProfilePopover({ cell, onBack, onDone }) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null); // { ok, message }
+
+  const submit = () => {
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    api
+      .saveProfile(trimmed, cell.id)
+      .then(() => setResult({ ok: true, message: `Saved "${trimmed}".` }))
+      .catch((e) => setResult({ ok: false, message: e.message }))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div class="absolute top-full right-0 mt-1.5 w-64 rounded-md border border-slate-700 bg-slate-950 p-3 text-xs shadow-xl z-10 space-y-2">
+      <PopoverBackHeader title="Save as profile" onBack={onBack} />
+      {result ? (
+        <>
+          <p class={result.ok ? 'text-emerald-400' : 'text-red-400'}>{result.message}</p>
+          <button type="button" class="btn-secondary w-full justify-center" onClick={result.ok ? onDone : () => setResult(null)}>
+            {result.ok ? 'Close' : 'Try again'}
+          </button>
+        </>
+      ) : (
+        <>
+          <input
+            class="input py-1"
+            placeholder="Profile name"
+            value={name}
+            autoFocus
+            onInput={(e) => setName(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()}
+          />
+          <button type="button" class="btn-primary w-full justify-center" disabled={busy || !name.trim()} onClick={submit}>
+            {busy ? <Loader2 size={14} class="animate-spin" /> : <Save size={14} />}
+            {busy ? 'Saving...' : 'Save'}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// summarizeProfile renders a profile's params as a compact one-line
+// description for the apply-profile list.
+function summarizeProfile(p = {}) {
+  const parts = [p.scalePct > 0 && p.scalePct < 100 ? `${p.scalePct}%` : 'original size'];
+  if (p.speed && p.speed !== 1) parts.push(`${p.speed}x`);
+  if (p.margin) parts.push(`margin ${p.margin}`);
+  if (p.bitrateKbps) parts.push(`${p.bitrateKbps}kbps`);
+  if (p.skipDenoise) parts.push('no denoise');
+  return parts.join(' · ');
+}
+
+// ApplyProfilePopover lists saved profiles; clicking one applies it to this
+// cell (resolving its scale percentage against the cell's actual source
+// resolution server-side). Each row also has inline edit/delete so a
+// profile can be tweaked without leaving the picker.
+function ApplyProfilePopover({ cell, onChanged, onBack, onDone }) {
+  const [profiles, setProfiles] = useState(null); // null = loading
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api
+      .listProfiles()
+      .then(setProfiles)
+      .catch((e) => setError(e.message));
+  }, []);
+
+  const startEdit = (p) => {
+    setError('');
+    setEditingId(p.id);
+    setDraft({ name: p.name, ...p.params });
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setDraft(null);
+  };
+  const saveEdit = () => {
+    api
+      .updateProfile(editingId, {
+        name: draft.name,
+        params: {
+          margin: draft.margin || '0.2s',
+          speed: Number(draft.speed) || 1,
+          scalePct: Number(draft.scalePct) || 0,
+          bitrateKbps: Number(draft.bitrateKbps) || 0,
+          lockAspect: !!draft.lockAspect,
+          skipDenoise: !!draft.skipDenoise,
+        },
+      })
+      .then((updated) => {
+        setProfiles((list) => list.map((p) => (p.id === updated.id ? updated : p)));
+        cancelEdit();
+      })
+      .catch((e) => setError(e.message));
+  };
+  const deleteProfile = (id) => {
+    if (!confirm('Delete this profile?')) return;
+    api
+      .deleteProfile(id)
+      .then(() => setProfiles((list) => list.filter((p) => p.id !== id)))
+      .catch((e) => setError(e.message));
+  };
+  const apply = (id) => {
+    setError('');
+    setBusyId(id);
+    api
+      .applyProfile(cell.id, id)
+      .then(() => {
+        onChanged();
+        onDone();
+      })
+      .catch((e) => {
+        setError(e.message);
+        setBusyId(null);
+      });
+  };
+
+  return (
+    <div class="absolute top-full right-0 mt-1.5 w-80 rounded-md border border-slate-700 bg-slate-950 p-3 text-xs shadow-xl z-10 space-y-2 max-h-[26rem] overflow-y-auto">
+      <PopoverBackHeader title="Apply profile" onBack={onBack} />
+      {error && <p class="text-red-400">{error}</p>}
+      {!profiles && <p class="text-slate-500">Loading...</p>}
+      {profiles && profiles.length === 0 && <p class="text-slate-500">No saved profiles yet — use "Save as profile" first.</p>}
+      <div class="space-y-1.5">
+        {profiles?.map((p) =>
+          editingId === p.id ? (
+            <div key={p.id} class="rounded border border-slate-700 p-2 space-y-1.5">
+              <input class="input py-1" value={draft.name} onInput={(e) => setDraft({ ...draft, name: e.currentTarget.value })} />
+              <div class="grid grid-cols-2 gap-1.5">
+                <div>
+                  <label class="label">Margin</label>
+                  <input class="input py-1" value={draft.margin || ''} onInput={(e) => setDraft({ ...draft, margin: e.currentTarget.value })} />
+                </div>
+                <div>
+                  <label class="label">Speed</label>
+                  <input
+                    class="input py-1"
+                    type="number"
+                    step="0.05"
+                    value={draft.speed ?? 1}
+                    onInput={(e) => setDraft({ ...draft, speed: e.currentTarget.value })}
+                  />
+                </div>
+                <div>
+                  <label class="label">Scale %</label>
+                  <input
+                    class="input py-1"
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="original"
+                    value={draft.scalePct || ''}
+                    onInput={(e) => setDraft({ ...draft, scalePct: e.currentTarget.value })}
+                  />
+                </div>
+                <div>
+                  <label class="label">Bitrate</label>
+                  <input
+                    class="input py-1"
+                    type="number"
+                    min="0"
+                    placeholder="original"
+                    value={draft.bitrateKbps || ''}
+                    onInput={(e) => setDraft({ ...draft, bitrateKbps: e.currentTarget.value })}
+                  />
+                </div>
+              </div>
+              <div class="flex items-center gap-3 text-[11px] text-slate-400">
+                <label class="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    class="accent-cyan-500"
+                    checked={!!draft.lockAspect}
+                    onChange={(e) => setDraft({ ...draft, lockAspect: e.currentTarget.checked })}
+                  />
+                  Lock aspect
+                </label>
+                <label class="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    class="accent-cyan-500"
+                    checked={!!draft.skipDenoise}
+                    onChange={(e) => setDraft({ ...draft, skipDenoise: e.currentTarget.checked })}
+                  />
+                  Skip denoise
+                </label>
+              </div>
+              <div class="flex items-center gap-1.5 pt-0.5">
+                <button type="button" class="btn-primary flex-1 justify-center py-1" onClick={saveEdit}>
+                  Save
+                </button>
+                <button type="button" class="btn-secondary flex-1 justify-center py-1" onClick={cancelEdit}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div key={p.id} class="flex items-center gap-1 rounded hover:bg-slate-900 pl-2 pr-1 py-1">
+              <button type="button" class="flex-1 min-w-0 text-left" disabled={busyId === p.id} onClick={() => apply(p.id)}>
+                <span class="block truncate text-slate-200">{p.name}</span>
+                <span class="block truncate text-[11px] text-slate-500">{summarizeProfile(p.params)}</span>
+              </button>
+              {busyId === p.id ? (
+                <Loader2 size={14} class="animate-spin text-cyan-400 shrink-0 mr-1.5" />
+              ) : (
+                <>
+                  <button type="button" class="text-slate-500 hover:text-cyan-400 p-1 shrink-0" title="Edit" onClick={() => startEdit(p)}>
+                    <Pencil size={13} />
+                  </button>
+                  <button type="button" class="text-slate-500 hover:text-red-400 p-1 shrink-0" title="Delete" onClick={() => deleteProfile(p.id)}>
+                    <Trash2 size={13} />
+                  </button>
+                </>
+              )}
+            </div>
+          )
+        )}
+      </div>
     </div>
   );
 }

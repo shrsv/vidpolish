@@ -22,6 +22,21 @@ type EditParams struct {
 	SkipDenoise bool `json:"skipDenoise"`
 }
 
+// ProfileParams is the params_json shape stored in a profiles row — a
+// resolution-independent template for EditParams. ScalePct is a percentage
+// of the target cell's source resolution (0 or >=100 means keep original);
+// BitrateKbps stays absolute since bitrate doesn't scale predictably with
+// resolution. LockAspect is carried through as-is (UI toggle state,
+// restored verbatim on apply, not resolution-dependent).
+type ProfileParams struct {
+	Margin      string  `json:"margin"`
+	Speed       float64 `json:"speed"`
+	ScalePct    float64 `json:"scalePct"`
+	BitrateKbps int     `json:"bitrateKbps"`
+	LockAspect  bool    `json:"lockAspect"`
+	SkipDenoise bool    `json:"skipDenoise"`
+}
+
 // TextParams is the params_json shape for a 'text' cell.
 type TextParams struct {
 	Markdown string `json:"markdown"`

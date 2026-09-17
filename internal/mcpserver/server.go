@@ -39,6 +39,7 @@ func Run(ctx context.Context, db *store.DB, version string) error {
 func (s *Server) registerTools(srv *mcp.Server) {
 	s.addPipelineTools(srv)
 	s.addProjectTools(srv)
+	s.addProfileTools(srv)
 	s.addYouTubeTools(srv)
 	s.addConfigTools(srv)
 }
