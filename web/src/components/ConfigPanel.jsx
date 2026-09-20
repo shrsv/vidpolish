@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Save, LogIn, CheckCircle2, History, RotateCcw } from 'lucide-preact';
+import { Save, LogIn, CheckCircle2, History, RotateCcw, Cpu, RefreshCw } from 'lucide-preact';
 import { api } from '../api.js';
 
 export function ConfigPanel({ section }) {
@@ -10,6 +10,7 @@ export function ConfigPanel({ section }) {
   const [loginStatus, setLoginStatus] = useState('');
   const [backups, setBackups] = useState([]);
   const [showBackups, setShowBackups] = useState(false);
+  const [redetecting, setRedetecting] = useState(false);
   const sectionRefs = useRef({});
 
   const refresh = () => api.getConfig().then(setCfg);
@@ -53,6 +54,11 @@ export function ConfigPanel({ section }) {
         descriptionTemplate: cfg.youtube.descriptionTemplate,
       },
       thumbnail: cfg.thumbnail,
+      performance: {
+        gpuAcceleration: cfg.performance.gpuAcceleration,
+        maxConcurrentJobs: cfg.performance.maxConcurrentJobs,
+        maxCacheGB: cfg.performance.maxCacheGB,
+      },
     };
     if (clientSecretInput) body.youtube.clientSecret = clientSecretInput;
     try {
@@ -74,6 +80,16 @@ export function ConfigPanel({ section }) {
     await api.restoreConfigBackup(timestamp);
     refresh();
     refreshBackups();
+  };
+
+  const reDetectGPU = async () => {
+    setRedetecting(true);
+    try {
+      await api.putConfig({ performance: { resetDetection: true } });
+      refresh();
+    } finally {
+      setRedetecting(false);
+    }
   };
 
   const connectYouTube = async () => {
@@ -191,6 +207,60 @@ export function ConfigPanel({ section }) {
             </div>
           ))}
         </div>
+      </section>
+
+      <section class="card p-4 space-y-3" ref={(el) => (sectionRefs.current.performance = el)}>
+        <h2 class="font-semibold">Performance</h2>
+        <div class="flex gap-4">
+          <div class="flex-1">
+            <label class="label">GPU acceleration</label>
+            <select
+              class="input"
+              value={cfg.performance.gpuAcceleration}
+              onChange={(e) => set('performance.gpuAcceleration', e.currentTarget.value)}
+            >
+              <option value="auto">Auto (use a hardware encoder if one works, else software)</option>
+              <option value="off">Off (always use software libx264)</option>
+            </select>
+          </div>
+          <div class="flex-1">
+            <label class="label">Max concurrent edit jobs</label>
+            <input
+              class="input"
+              type="number"
+              min="1"
+              value={cfg.performance.maxConcurrentJobs}
+              onInput={(e) => set('performance.maxConcurrentJobs', Number(e.currentTarget.value) || 1)}
+            />
+          </div>
+        </div>
+        <div class="flex items-center gap-3 text-sm">
+          <span class="flex items-center gap-1.5 text-slate-400">
+            <Cpu size={14} />
+            Currently using: {cfg.performance.detectedEncoder || 'software (libx264)'}
+          </span>
+          <button class="btn-secondary ml-auto" onClick={reDetectGPU} disabled={redetecting}>
+            <RefreshCw size={13} class={redetecting ? 'animate-spin' : ''} /> Re-detect
+          </button>
+        </div>
+        <div>
+          <label class="label">Cache size limit (GB)</label>
+          <input
+            class="input w-32"
+            type="number"
+            min="1"
+            value={cfg.performance.maxCacheGB}
+            onInput={(e) => set('performance.maxCacheGB', Number(e.currentTarget.value) || 1)}
+          />
+          <p class="text-xs text-slate-500 mt-1">
+            ~/.vidpolish/cache holds intermediate edit artifacts; oldest entries are deleted first once this is
+            exceeded.
+          </p>
+        </div>
+        <p class="text-xs text-slate-500">
+          Max concurrent jobs and GPU acceleration take effect on the next run; the concurrency limit itself
+          applies after restarting vidpolish.
+        </p>
       </section>
 
       {saveError && (

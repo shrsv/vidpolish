@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,10 +45,50 @@ type Thumbnail struct {
 	TextColor       string `toml:"text_color"`
 }
 
+// Performance controls how much CPU/GPU/disk vidpolish's pipeline is
+// allowed to use at once - the knobs that keep a large-file edit from
+// dragging down the whole machine.
+type Performance struct {
+	// GPUAcceleration is "auto" (try a hardware encoder, falling back to
+	// software libx264 if none works) or "off" (always use libx264).
+	GPUAcceleration string `toml:"gpu_acceleration"`
+
+	// DetectedEncoder/DetectedForFFmpeg cache the result of probing for a
+	// working hardware encoder (see internal/pipeline/hwaccel.go), so the
+	// probe - which runs a real smoke-test encode - only happens once per
+	// ffmpeg binary rather than on every run. DetectedForFFmpeg identifies
+	// the ffmpeg binary the probe ran against (path+mtime); a mismatch
+	// (e.g. binmgr fetched a new ffmpeg) triggers one re-probe.
+	DetectedEncoder   string `toml:"detected_encoder"`
+	DetectedForFFmpeg string `toml:"detected_for_ffmpeg"`
+
+	// MaxConcurrentJobs caps how many edit-cell pipeline runs execute at
+	// once; extras queue instead of starting immediately. 0 means "auto"
+	// (half the machine's CPU cores, at least 1).
+	MaxConcurrentJobs int `toml:"max_concurrent_jobs"`
+
+	// MaxCacheGB caps ~/.vidpolish/cache's total size; oldest entries are
+	// evicted first once exceeded. 0 means "auto" (20GB).
+	MaxCacheGB int `toml:"max_cache_gb"`
+}
+
+// DefaultMaxConcurrentJobs is used whenever MaxConcurrentJobs is unset (0):
+// half the machine's cores, never less than 1.
+func DefaultMaxConcurrentJobs() int {
+	if n := runtime.NumCPU() / 2; n > 1 {
+		return n
+	}
+	return 1
+}
+
+// DefaultMaxCacheGB is used whenever MaxCacheGB is unset (0).
+const DefaultMaxCacheGB = 20
+
 // Config is the top-level vidpolish configuration.
 type Config struct {
-	YouTube   YouTube   `toml:"youtube"`
-	Thumbnail Thumbnail `toml:"thumbnail"`
+	YouTube     YouTube     `toml:"youtube"`
+	Thumbnail   Thumbnail   `toml:"thumbnail"`
+	Performance Performance `toml:"performance"`
 }
 
 const configTemplate = `[youtube]
@@ -85,6 +126,25 @@ logo_path = ""
 background_color = "#0f172a"
 accent_color     = "#22d3ee"
 text_color       = "#ffffff"
+
+[performance]
+# GPU-accelerated encoding: "auto" (try a hardware encoder, falling back to
+# software libx264 if none works or none is present) or "off" (always use
+# software libx264).
+gpu_acceleration = "auto"
+
+# Filled in automatically once a working hardware encoder is found; leave
+# both blank to force re-detection on the next run.
+detected_encoder = ""
+detected_for_ffmpeg = ""
+
+# 0 = auto (half the machine's CPU cores, at least 1). How many edit-cell
+# jobs may run at once; extra runs queue instead of starting immediately.
+max_concurrent_jobs = 0
+
+# 0 = auto (20GB). Cap on ~/.vidpolish/cache's total size; oldest entries
+# are evicted first once exceeded.
+max_cache_gb = 0
 `
 
 // Path returns the path to ~/.vidpolish/config.toml.
@@ -159,6 +219,15 @@ func Load() (*Config, error) {
 	if cfg.Thumbnail.TextColor == "" {
 		cfg.Thumbnail.TextColor = "#ffffff"
 	}
+	if cfg.Performance.GPUAcceleration == "" {
+		cfg.Performance.GPUAcceleration = "auto"
+	}
+	if cfg.Performance.MaxConcurrentJobs <= 0 {
+		cfg.Performance.MaxConcurrentJobs = DefaultMaxConcurrentJobs()
+	}
+	if cfg.Performance.MaxCacheGB <= 0 {
+		cfg.Performance.MaxCacheGB = DefaultMaxCacheGB
+	}
 	return &cfg, nil
 }
 
@@ -193,6 +262,15 @@ func Validate(cfg *Config) error {
 		if _, err := template.New("description").Parse(cfg.YouTube.DescriptionTemplate); err != nil {
 			return fmt.Errorf("youtube.description_template is not a valid template: %w", err)
 		}
+	}
+	if g := cfg.Performance.GPUAcceleration; g != "" && g != "auto" && g != "off" {
+		return fmt.Errorf(`performance.gpu_acceleration must be "auto" or "off", got %q`, g)
+	}
+	if cfg.Performance.MaxConcurrentJobs < 0 {
+		return fmt.Errorf("performance.max_concurrent_jobs must not be negative")
+	}
+	if cfg.Performance.MaxCacheGB < 0 {
+		return fmt.Errorf("performance.max_cache_gb must not be negative")
 	}
 	return nil
 }

@@ -40,6 +40,7 @@ func denoise(deepFilterPath, inputWav, outDir string, duration float64, report f
 
 	cmd := exec.Command(deepFilterPath, inputWav, "-o", outDir)
 	procutil.HideWindow(cmd)
+	procutil.LowerPriority(cmd)
 
 	stop := make(chan struct{})
 	if report != nil && duration > 0 {

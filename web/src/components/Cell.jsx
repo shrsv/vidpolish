@@ -31,7 +31,8 @@ import {
 import { api } from '../api.js';
 import { navigate, paths } from '../router.js';
 import { MediaInfoBadge, formatSize } from './MediaInfoBadge.jsx';
-import { sanitizeFilename, saveBlob } from '../download.js';
+import { ProgressStepper, tryParseProgress } from './ProgressStepper.jsx';
+import { buildDownloadName, saveBlob } from '../download.js';
 import { renderMarkdown } from '../markdown.js';
 import { timeAgo, fullTimestamp } from '../time.js';
 
@@ -47,6 +48,8 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(cell.name);
   const [youtubeUrl, setYoutubeUrl] = useState(cell.youtubeUrl || '');
+  const [starting, setStarting] = useState(false);
+  const [runError, setRunError] = useState('');
   const stopRef = useRef(null);
 
   useEffect(() => setYoutubeUrl(cell.youtubeUrl || ''), [cell.youtubeUrl]);
@@ -95,12 +98,27 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
     };
   }, [cell.status, cell.id]);
 
-  const run = () => api.runCell(cell.id).then(onChanged);
+  const run = () => {
+    // Disable immediately on click rather than waiting for the server
+    // round trip + a parent re-render to reflect status:'running' - that
+    // gap is exactly the window that let a fast double/triple click on a
+    // large-file run queue up several requests with the button still
+    // looking clickable. Also surface a rejected run (e.g. 409 "already
+    // running") instead of silently doing nothing, which previously left
+    // no feedback at all for a repeated click.
+    setStarting(true);
+    setRunError('');
+    api
+      .runCell(cell.id)
+      .then(onChanged)
+      .catch((e) => setRunError(e.message))
+      .finally(() => setStarting(false));
+  };
   const remove = () => {
     if (confirm(`Delete "${cell.name}"?`)) api.deleteCell(cell.id).then(onDelete);
   };
   const download = async () => {
-    const suggestedName = `${sanitizeFilename(cell.name)}.mp4`;
+    const suggestedName = buildDownloadName(project, cell.name, '.mp4');
     // Prefer a real OS save-file dialog (Chromium's File System Access
     // API) so people can pick where the file goes, instead of it silently
     // landing in the browser's default Downloads folder.
@@ -183,8 +201,8 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
         {/* Cell toolbar: one disciplined place for every action. */}
         <div class="flex items-center gap-2 shrink-0">
           {cell.kind !== 'text' && (
-            <button class="btn-primary" disabled={cell.status === 'running'} onClick={run}>
-              {cell.status === 'running' ? <Loader2 size={15} class="animate-spin" /> : <Play size={15} />}
+            <button class="btn-primary" disabled={starting || cell.status === 'running'} onClick={run}>
+              {starting || cell.status === 'running' ? <Loader2 size={15} class="animate-spin" /> : <Play size={15} />}
               Run
             </button>
           )}
@@ -193,7 +211,7 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
               <Download size={15} />
             </button>
           )}
-          {cell.kind === 'edit' && cell.mediaUrl && <GifExportButton cell={cell} />}
+          {cell.kind === 'edit' && cell.mediaUrl && <GifExportButton cell={cell} project={project} />}
           {cell.kind === 'edit' && <ProfileMenuButton cell={cell} onChanged={onChanged} />}
           <button class="btn-danger" onClick={remove} title="Delete">
             <Trash2 size={15} />
@@ -207,19 +225,43 @@ export function Cell({ cell, editCells, project, collapsed, onToggleCollapse, on
           {cell.kind === 'upload' && <UploadParamsForm cell={cell} editCells={editCells} onChanged={onChanged} />}
           {cell.kind === 'text' && <TextCellForm cell={cell} project={project} onChanged={onChanged} />}
 
-          {cell.kind !== 'upload' && live && cell.status === 'running' && (
-            <p class="text-xs text-cyan-400 font-mono">{live}</p>
-          )}
-          {cell.kind === 'upload' && cell.status === 'running' && (
-            <UploadStatusBar info={parseUploadStatus(live)} />
-          )}
+          {cell.status === 'running' &&
+            live &&
+            (() => {
+              const progress = tryParseProgress(live);
+              return progress ? (
+                <ProgressStepper progress={progress} />
+              ) : (
+                <p class="text-xs text-cyan-400 font-mono">{live}</p>
+              );
+            })()}
+          {runError && <p class="text-xs text-red-400 font-mono">{runError}</p>}
           {cell.status === 'error' && cell.statusMessage && (
             <p class="text-xs text-red-400 font-mono whitespace-pre-wrap">{cell.statusMessage}</p>
           )}
 
           {cell.kind === 'edit' && cell.mediaUrl && (
             <>
-              <video controls src={cell.mediaUrl} class="w-full rounded-md max-h-80" />
+              {/* Plays previewUrl (a small, standardized proxy re-encode -
+                  see generateCellPreview), never the real output directly:
+                  a raw/heavily-encoded file can have quirks (odd
+                  dimensions, unusual timestamps) that stall a browser's
+                  decoder indefinitely, which previewUrl sidesteps by being
+                  deliberately unexceptional. Falls back to mediaUrl (the
+                  real file) if no preview has been generated yet. Also
+                  preload="none" + a small pre-generated poster frame (see
+                  handleCellPoster) instead of eagerly loading video
+                  bytes/metadata on page load - with several edit cells on
+                  a page, that used to fire that many simultaneous
+                  byte-range fetches at once. The video itself is only
+                  fetched once the user actually presses play. */}
+              <video
+                controls
+                preload="none"
+                poster={`/api/cells/${cell.id}/poster`}
+                src={cell.previewUrl || cell.mediaUrl}
+                class="w-full rounded-md max-h-80"
+              />
               <MediaInfoBadge cellId={cell.id} status={cell.status} />
               {onAddUpload && (
                 <button class="btn-primary w-fit" onClick={onAddUpload}>
@@ -293,43 +335,6 @@ function ThumbnailPreview({ title }) {
   );
 }
 
-// parseUploadStatus turns the raw SSE log line for an upload cell into a
-// structured {label, percent, eta} so the UI can show a real step/progress
-// indicator instead of a single opaque line of text.
-function parseUploadStatus(msg) {
-  if (!msg) return { label: 'Starting...', percent: null, eta: null };
-  const uploading = msg.match(/^uploading: ([\d.]+)% \(ETA (.+)\)$/);
-  if (uploading) {
-    return { label: 'Uploading to YouTube', percent: Number(uploading[1]), eta: uploading[2] };
-  }
-  if (msg.startsWith('uploaded:')) {
-    return { label: 'Upload complete — finalizing', percent: 100, eta: null };
-  }
-  const processing = msg.match(/processing status: (\w+)/);
-  if (processing) {
-    return { label: `Processing on YouTube (${processing[1]})`, percent: null, eta: null };
-  }
-  return { label: msg.replace(/^==>\s*/, ''), percent: null, eta: null };
-}
-
-function UploadStatusBar({ info }) {
-  return (
-    <div class="space-y-1">
-      <div class="flex items-center justify-between text-xs text-cyan-400">
-        <span class="flex items-center gap-1.5">
-          <Loader2 size={12} class="animate-spin" /> {info.label}
-        </span>
-        {info.eta && <span class="text-slate-500">ETA {info.eta}</span>}
-      </div>
-      <div class="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
-        <div
-          class={`h-full bg-cyan-500 ${info.percent == null ? 'animate-pulse w-1/3' : 'transition-all'}`}
-          style={info.percent != null ? { width: `${info.percent}%` } : undefined}
-        />
-      </div>
-    </div>
-  );
-}
 
 function YouTubeLinkBox({ url }) {
   const [copied, setCopied] = useState(false);
@@ -366,7 +371,7 @@ function YouTubeLinkBox({ url }) {
 // — blank width keeps the source's own width). The conversion happens
 // server-side on click and streams straight back as a blob to save,
 // rather than being persisted anywhere.
-function GifExportButton({ cell }) {
+function GifExportButton({ cell, project }) {
   const [open, setOpen] = useState(false);
   const [fps, setFps] = useState(12);
   const [width, setWidth] = useState('');
@@ -388,7 +393,7 @@ function GifExportButton({ cell }) {
     setError('');
     try {
       const blob = await api.exportGif(cell.id, { fps: Number(fps) || 12, width: Number(width) || 0 });
-      await saveBlob(blob, `${sanitizeFilename(cell.name)}.gif`, {
+      await saveBlob(blob, buildDownloadName(project, cell.name, '.gif'), {
         description: 'GIF image',
         accept: { 'image/gif': ['.gif'] },
       });

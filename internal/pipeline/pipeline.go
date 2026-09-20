@@ -43,10 +43,51 @@ type Options struct {
 
 	NoCache bool // if true, ignore existing cache entries and recompute everything
 
+	// Encoder, if set (an internal/pipeline hwEncoders key, e.g.
+	// "h264_nvenc"), is used in place of software libx264 for the passes
+	// this package re-encodes video in (split, resize). Empty means
+	// software libx264, unchanged default behavior. Callers resolve this
+	// via ResolveEncoder rather than hardcoding it.
+	Encoder string
+
+	// MaxThreads caps ffmpeg's own -threads flag for the video passes this
+	// package re-encodes, so several concurrent Process runs (e.g.
+	// speed-variant edit cells) don't each claim every CPU core. 0 means
+	// "let ffmpeg decide" (its default, unchanged CLI behavior).
+	MaxThreads int
+
+	// MaxCacheBytes caps ~/.vidpolish/cache's total size before this run
+	// starts, evicting oldest entries first when exceeded. <= 0 disables
+	// the cap (Sweep's 7-day TTL is still applied regardless).
+	MaxCacheBytes int64
+
 	// Log, if set, receives stage-progress messages instead of them being
 	// printed to stdout. Callers that don't set it (e.g. the CLI) get the
 	// original stdout behavior unchanged.
 	Log func(string)
+
+	// OnProgress, if set, receives structured stage progress as the job
+	// runs: stepIndex (0-based, indexing into StageLabels(Denoise,
+	// needsResize)) and stepPct (0-100, progress within that step). Unlike
+	// Log's free-text lines, this is meant for a caller building a real
+	// multi-step progress UI (a stepper: which stages are done, which is
+	// active, its own percentage) rather than a single scrolling status
+	// line.
+	OnProgress func(stepIndex int, stepPct float64)
+}
+
+// StageLabels returns the ordered, human-readable stage labels a Process
+// run with these settings will go through - e.g. for building a full
+// step list upfront (before the run starts) for a progress UI. Mirrors
+// stageBoundsFor's own stage plan exactly (same function it's built
+// from), so the two can never drift apart.
+func StageLabels(denoise, needsResize bool) []string {
+	bounds := stageBoundsFor(denoise, needsResize)
+	labels := make([]string, len(bounds))
+	for i, b := range bounds {
+		labels[i] = b.label
+	}
+	return labels
 }
 
 const editMethod = "audio"
@@ -58,6 +99,19 @@ func (o Options) logf(format string, args ...any) {
 		return
 	}
 	fmt.Println(msg)
+}
+
+// withEncoderFallback runs fn with o.Encoder, retrying once in software
+// (encoder "") if it fails and a hardware encoder was requested - passing
+// ResolveEncoder's own smoke test doesn't guarantee every later encode
+// succeeds too (e.g. a driver could be reset/unavailable mid-session).
+func (o Options) withEncoderFallback(fn func(encoder string) error) error {
+	err := fn(o.Encoder)
+	if err == nil || o.Encoder == "" {
+		return err
+	}
+	o.logf("==> hardware encoder %q failed, retrying with software libx264: %v", o.Encoder, err)
+	return fn("")
 }
 
 // Stage weights: an approximate share of total wall-clock time each
@@ -149,6 +203,9 @@ func Process(opts Options) (string, error) {
 		if err := cache.Sweep(root, cache.DefaultTTL); err != nil {
 			fmt.Fprintf(os.Stderr, "vidpolish: cache sweep warning: %v\n", err)
 		}
+		if err := cache.EnforceSizeCap(root, opts.MaxCacheBytes); err != nil {
+			fmt.Fprintf(os.Stderr, "vidpolish: cache size-cap warning: %v\n", err)
+		}
 	}
 
 	fp, err := cache.Fingerprint(opts.Input)
@@ -188,7 +245,10 @@ func Process(opts Options) (string, error) {
 	if opts.NoCache || !exists(videoOnly) || !exists(rawAudio) {
 		r := opts.newStageReporter(start, bounds, stage)
 		r.report(0)
-		if err := splitVideoAudio(ffmpegPath, opts.Input, videoOnly, rawAudio, duration, r.report); err != nil {
+		err := opts.withEncoderFallback(func(encoder string) error {
+			return splitVideoAudio(ffmpegPath, opts.Input, videoOnly, rawAudio, encoder, opts.MaxThreads, duration, r.report)
+		})
+		if err != nil {
 			unlock()
 			return "", err
 		}
@@ -283,7 +343,10 @@ func Process(opts Options) (string, error) {
 			r := opts.newStageReporter(start, bounds, stage)
 			r.report(0)
 			editedDuration, _ := probeDuration(ffprobePath, edited)
-			if err := resizeVideo(ffmpegPath, edited, final, opts.Width, opts.Height, opts.BitrateKbps, editedDuration, r.report); err != nil {
+			err := opts.withEncoderFallback(func(encoder string) error {
+				return resizeVideo(ffmpegPath, edited, final, opts.Width, opts.Height, opts.BitrateKbps, encoder, opts.MaxThreads, editedDuration, r.report)
+			})
+			if err != nil {
 				return "", err
 			}
 		} else {

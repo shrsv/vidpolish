@@ -163,7 +163,29 @@ export function ProjectView({ projectId, initialCellSeq }) {
                 updated {timeAgo(source.updatedAt)}
               </span>
             </div>
-            <video controls src={source.mediaUrl} class="w-full rounded-md max-h-80" />
+            {/* Plays previewUrl (a small, standardized proxy re-encode of
+                the raw upload - see generateCellPreview), not the raw
+                file directly: a raw screen recording can have quirks
+                (odd dimensions, unusual timestamp/GOP pacing) that stall
+                a browser's decoder indefinitely under plain progressive
+                download, confirmed on a real file in both an embedded
+                WebView2 window and a full desktop browser. Falls back to
+                mediaUrl if no preview has been generated yet (e.g. an
+                older project uploaded before this existed).
+                preload="auto" (not "none"): there's only ever one source
+                video, so the "avoid loading everything at once" concern
+                that applies to a page full of edit-cell videos doesn't
+                apply here, and the proxy is small enough that eagerly
+                loading it gives an instantly ready-to-play preview. A
+                poster (see handleCellPoster) still gives an immediate
+                real frame before even that finishes. */}
+            <video
+              controls
+              preload="auto"
+              poster={`/api/cells/${source.id}/poster`}
+              src={source.previewUrl || source.mediaUrl}
+              class="w-full rounded-md max-h-80"
+            />
             <MediaInfoBadge cellId={source.id} status={source.status} />
           </div>
         ) : (

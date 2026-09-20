@@ -26,6 +26,7 @@ func ExportGIF(ffmpegPath, input, output string, fps, width int) error {
 
 	cmd := exec.Command(ffmpegPath, "-y", "-i", input, "-vf", filter, output)
 	procutil.HideWindow(cmd)
+	procutil.LowerPriority(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

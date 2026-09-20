@@ -32,3 +32,19 @@ func HideWindow(cmd *exec.Cmd) {
 	cmd.SysProcAttr.HideWindow = true
 	cmd.SysProcAttr.CreationFlags |= createNoWindow
 }
+
+// belowNormalPriorityClass tells Windows to schedule the process at lower
+// priority than normal foreground applications.
+const belowNormalPriorityClass = 0x00004000
+
+// LowerPriority runs cmd at below-normal OS scheduling priority, so a
+// maxed-out ffmpeg/deep-filter/auto-editor pass competes for CPU behind the
+// desktop UI/OS instead of starving it - large edits pinning every core is
+// still expected, but the machine should stay interactive while it happens
+// rather than needing a hard restart. It doesn't reduce total CPU used.
+func LowerPriority(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= belowNormalPriorityClass
+}

@@ -172,6 +172,20 @@ func (r *stageReporter) report(local float64) {
 		overall = 0.99
 	}
 
+	// Exactly one of these fires per tick, never both: a caller with
+	// OnProgress wired up (the server, driving a structured stepper UI)
+	// would otherwise also get this plain-text line published on the same
+	// per-cell status/SSE channel on every single tick - since both write
+	// to the same channel, the frontend then saw alternating plain-text
+	// and JSON messages in rapid succession, flickering between the
+	// stepper and the plain-text fallback display with every tick.
+	if r.opts.OnProgress != nil {
+		// r.stepIndex is 1-based (see newStageReporter); OnProgress's
+		// contract is 0-based, matching a slice index into StageLabels.
+		r.opts.OnProgress(r.stepIndex-1, local*100)
+		return
+	}
+
 	eta := "estimating..."
 	if overall > 0.02 {
 		elapsed := time.Since(r.jobStart).Seconds()
@@ -189,6 +203,7 @@ func runFFmpegWithProgress(ffmpegPath string, args []string, totalDuration float
 	fullArgs := append([]string{"-y", "-progress", "pipe:1", "-nostats"}, args...)
 	cmd := exec.Command(ffmpegPath, fullArgs...)
 	procutil.HideWindow(cmd)
+	procutil.LowerPriority(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

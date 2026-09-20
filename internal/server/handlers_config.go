@@ -42,6 +42,12 @@ type configResponse struct {
 		AccentColor     string `json:"accentColor"`
 		TextColor       string `json:"textColor"`
 	} `json:"thumbnail"`
+	Performance struct {
+		GPUAcceleration   string `json:"gpuAcceleration"`
+		DetectedEncoder   string `json:"detectedEncoder"` // read-only: "" means software (libx264) or not yet probed
+		MaxConcurrentJobs int    `json:"maxConcurrentJobs"`
+		MaxCacheGB        int    `json:"maxCacheGB"`
+	} `json:"performance"`
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +82,10 @@ func toConfigResponse(cfg *config.Config) *configResponse {
 	out.Thumbnail.BackgroundColor = cfg.Thumbnail.BackgroundColor
 	out.Thumbnail.AccentColor = cfg.Thumbnail.AccentColor
 	out.Thumbnail.TextColor = cfg.Thumbnail.TextColor
+	out.Performance.GPUAcceleration = cfg.Performance.GPUAcceleration
+	out.Performance.DetectedEncoder = cfg.Performance.DetectedEncoder
+	out.Performance.MaxConcurrentJobs = cfg.Performance.MaxConcurrentJobs
+	out.Performance.MaxCacheGB = cfg.Performance.MaxCacheGB
 	return &out
 }
 
@@ -98,6 +108,15 @@ type configUpdateRequest struct {
 		AccentColor     *string `json:"accentColor"`
 		TextColor       *string `json:"textColor"`
 	} `json:"thumbnail"`
+	Performance *struct {
+		GPUAcceleration *string `json:"gpuAcceleration"`
+		// ResetDetection, if true, clears the cached hardware-encoder
+		// probe result so the next edit run re-probes from scratch
+		// (the UI's "Re-detect" action).
+		ResetDetection    *bool `json:"resetDetection"`
+		MaxConcurrentJobs *int  `json:"maxConcurrentJobs"`
+		MaxCacheGB        *int  `json:"maxCacheGB"`
+	} `json:"performance"`
 }
 
 func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
@@ -137,6 +156,21 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if yt.DescriptionTemplate != nil {
 			cfg.YouTube.DescriptionTemplate = *yt.DescriptionTemplate
+		}
+	}
+	if perf := req.Performance; perf != nil {
+		if perf.GPUAcceleration != nil {
+			cfg.Performance.GPUAcceleration = *perf.GPUAcceleration
+		}
+		if perf.ResetDetection != nil && *perf.ResetDetection {
+			cfg.Performance.DetectedEncoder = ""
+			cfg.Performance.DetectedForFFmpeg = ""
+		}
+		if perf.MaxConcurrentJobs != nil {
+			cfg.Performance.MaxConcurrentJobs = *perf.MaxConcurrentJobs
+		}
+		if perf.MaxCacheGB != nil {
+			cfg.Performance.MaxCacheGB = *perf.MaxCacheGB
 		}
 	}
 	if th := req.Thumbnail; th != nil {

@@ -27,6 +27,7 @@ type cellResponse struct {
 	Status         string `json:"status"`
 	StatusMessage  string `json:"statusMessage,omitempty"`
 	MediaURL       string `json:"mediaUrl,omitempty"`
+	PreviewURL     string `json:"previewUrl,omitempty"`
 	ThumbnailURL   string `json:"thumbnailUrl,omitempty"`
 	SourceFilename string `json:"sourceFilename,omitempty"`
 	YouTubeURL     string `json:"youtubeUrl,omitempty"`
@@ -54,6 +55,13 @@ func cellToResponse(c *store.Cell) *cellResponse {
 	}
 	if c.OutputPath != nil && *c.OutputPath != "" {
 		r.MediaURL = "/api/media/" + c.ID
+	}
+	if c.Kind == store.KindSource || c.Kind == store.KindEdit {
+		if path, err := cellPreviewPath(c); err == nil {
+			if _, err := os.Stat(path); err == nil {
+				r.PreviewURL = "/api/cells/" + c.ID + "/preview"
+			}
+		}
 	}
 	if c.Kind == store.KindUpload {
 		if path, err := cellThumbnailPath(c); err == nil {

@@ -11,32 +11,52 @@ import (
 	"os"
 	"path/filepath"
 
+	"vidpolish/internal/config"
 	"vidpolish/internal/store"
 )
 
 // Server holds the shared state behind the API: the database, the SSE
 // hub for live cell/YouTube-login progress, the job tracker preventing
-// double-runs, and the tool-download tracker (polled, not SSE - see
-// toolTracker).
+// double-runs, the tool-download tracker (polled, not SSE - see
+// toolTracker), and the pipeline concurrency semaphore (see
+// runEditCell): several heavy edit-cell pipeline runs (e.g. speed
+// variants of the same large source) starting at once, each claiming
+// every CPU core and doing large sequential disk I/O with no bound, is
+// what actually drags the whole OS down on big files - not just any one
+// run being slow.
 type Server struct {
-	db    *store.DB
-	hub   *hub
-	jobs  *jobTracker
-	tools *toolTracker
-	mux   *http.ServeMux
+	db          *store.DB
+	hub         *hub
+	jobs        *jobTracker
+	tools       *toolTracker
+	mux         *http.ServeMux
+	pipelineSem chan struct{}
 }
 
 // New builds a Server backed by db and wires up all routes.
 func New(db *store.DB) *Server {
 	s := &Server{
-		db:    db,
-		hub:   newHub(),
-		jobs:  newJobTracker(),
-		tools: newToolTracker(),
-		mux:   http.NewServeMux(),
+		db:          db,
+		hub:         newHub(),
+		jobs:        newJobTracker(),
+		tools:       newToolTracker(),
+		mux:         http.NewServeMux(),
+		pipelineSem: make(chan struct{}, resolveMaxConcurrentJobs()),
 	}
 	s.routes()
 	return s
+}
+
+// resolveMaxConcurrentJobs reads performance.max_concurrent_jobs from
+// config.toml if one exists, falling back to config's own default (half
+// the machine's cores) if not - the semaphore size is fixed for this
+// server's lifetime; changing the setting takes effect on next restart,
+// same as any other config value that's read once at startup.
+func resolveMaxConcurrentJobs() int {
+	if cfg, err := config.Load(); err == nil {
+		return cfg.Performance.MaxConcurrentJobs
+	}
+	return config.DefaultMaxConcurrentJobs()
 }
 
 // Handler returns the http.Handler serving both the API and the embedded
@@ -71,6 +91,8 @@ func (s *Server) routes() {
 
 	s.mux.HandleFunc("GET /api/media/{id}", s.handleMedia)
 	s.mux.HandleFunc("GET /api/cells/{id}/thumbnail", s.handleCellThumbnail)
+	s.mux.HandleFunc("GET /api/cells/{id}/poster", s.handleCellPoster)
+	s.mux.HandleFunc("GET /api/cells/{id}/preview", s.handleCellPreview)
 	s.mux.HandleFunc("POST /api/thumbnail/preview", s.handleThumbnailPreview)
 
 	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)

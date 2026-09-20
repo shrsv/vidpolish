@@ -52,6 +52,7 @@ func autoEdit(autoEditorPath, input, output, margin string, speed float64, repor
 
 	cmd := exec.Command(autoEditorPath, args...)
 	procutil.HideWindow(cmd)
+	procutil.LowerPriority(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("auto-editor: %w", err)

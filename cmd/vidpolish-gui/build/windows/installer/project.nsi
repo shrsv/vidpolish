@@ -47,6 +47,12 @@ ManifestDPIAware true
 !define MUI_ABORTWARNING
 !define MUI_COMPONENTSPAGE_NODESC
 
+; Offers to launch vidpolish once install finishes, checked by default
+; (no MUI_FINISHPAGE_RUN_NOTCHECKED) - so unless someone unticks it, the
+; app just shows up right after clicking Finish.
+!define MUI_FINISHPAGE_RUN "$INSTDIR\${PRODUCT_EXECUTABLE}"
+!define MUI_FINISHPAGE_RUN_TEXT "Start ${INFO_PRODUCTNAME}"
+
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
@@ -85,8 +91,6 @@ Section "-Core" SecCore
     ; build/bin/vidpolish.exe by the gui-build-windows Makefile target).
     File "..\..\bin\vidpolish.exe"
 
-    CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-
     ; Add the install dir to the machine PATH so `vidpolish` works from any
     ; terminal (requires admin, which wails.setShellContext already assumes
     ; for a per-machine install).
@@ -99,6 +103,14 @@ Section "-Core" SecCore
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro wails.writeUninstaller
+SectionEnd
+
+; A plain (non "-Core") Section shows up as a checkbox on the components
+; page and defaults to checked - so this and SecDesktop below both start
+; ticked, matching "on unless someone turns it off".
+Section "Add a Start Menu shortcut" SecStartMenu
+    !insertmacro wails.setShellContext
+    CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
 SectionEnd
 
 Section "Create a Desktop shortcut" SecDesktop

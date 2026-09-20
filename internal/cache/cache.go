@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -162,6 +163,49 @@ func readCachedAt(dir string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return time.Unix(sec, 0), nil
+}
+
+// EnforceSizeCap deletes whole cache entries under root, oldest-touched
+// (by their .cached-at marker) first, until the total is at or below
+// capBytes. capBytes <= 0 disables the cap. Each source video can leave
+// several full-size intermediate copies behind per run (split video, raw
+// and denoised audio, remux, edited output, one resized variant per
+// distinct width/height/bitrate) with no other bound but Sweep's 7-day
+// TTL, so several large sources or many edit variants can otherwise grow
+// this directory - and the sustained disk I/O of writing into an
+// almost-full disk - without limit.
+func EnforceSizeCap(root string, capBytes int64) error {
+	if capBytes <= 0 {
+		return nil
+	}
+	entries, err := ListEntries(root)
+	if err != nil {
+		return err
+	}
+	var total int64
+	for _, e := range entries {
+		total += e.SizeBytes
+	}
+	if total <= capBytes {
+		return nil
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].CachedAt.Before(entries[j].CachedAt) })
+
+	var errs []string
+	for _, e := range entries {
+		if total <= capBytes {
+			break
+		}
+		if err := os.RemoveAll(filepath.Join(root, e.Fingerprint)); err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		total -= e.SizeBytes
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("cache size-cap eviction errors: %s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // Entry describes one cache directory, for cache-management UIs.

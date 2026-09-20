@@ -80,14 +80,19 @@ func OpenAt(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("creating db dir: %w", err)
 	}
-	sqlDB, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	// WAL mode lets readers (media/thumbnail serving, status polling) run
+	// concurrently with the single writer instead of all traffic queueing
+	// behind one connection - busy_timeout makes a writer wait briefly
+	// instead of failing outright on the rare moment two writes actually
+	// collide, rather than needing SetMaxOpenConns(1) to avoid "database is
+	// locked" errors (the previous approach here), which serialized every
+	// single DB access in the whole app - including the many concurrent
+	// reads a project page with several video previews triggers at once.
+	sqlDB, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
 	}
-	// modernc.org/sqlite does not support concurrent writers well; a
-	// single connection avoids "database is locked" errors for this
-	// tool's modest local concurrency (a handful of running cells).
-	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxOpenConns(8)
 	if _, err := sqlDB.Exec(schema); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("applying schema: %w", err)

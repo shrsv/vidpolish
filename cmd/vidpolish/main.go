@@ -213,6 +213,24 @@ func runProcess(args []string) {
 		opts.Denoise = !ep.SkipDenoise
 	}
 
+	// GPU acceleration and the cache size cap are config-driven (see
+	// internal/config's [performance] section) so they behave the same
+	// whether triggered from the CLI or the local UI; a missing
+	// config.toml just means "use the defaults" rather than an error.
+	cfg, _ := config.Load()
+	if ffmpegPath, ffErr := binmgr.Resolve(binmgr.FFmpeg); ffErr == nil {
+		if encoder, encErr := pipeline.ResolveEncoder(cfg, ffmpegPath); encErr == nil {
+			opts.Encoder = encoder
+		} else {
+			fmt.Fprintln(os.Stderr, "warning: GPU detection failed, using software encoding:", encErr)
+		}
+	}
+	maxCacheGB := config.DefaultMaxCacheGB
+	if cfg != nil {
+		maxCacheGB = cfg.Performance.MaxCacheGB
+	}
+	opts.MaxCacheBytes = int64(maxCacheGB) << 30
+
 	out, err := pipeline.Process(opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
