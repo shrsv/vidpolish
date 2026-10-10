@@ -813,4 +813,4 @@ every diff with equal effort, it scores each change by blast radius (how
 far its impact reaches through your call graph), so review attention goes
 where it actually matters.
 
-[![LiveReview: Blast-Radius Aware AI Code Review for Business-Critical Systems](media/livereview-banner.png)](https://hexmos.com/livereview)
+[![LiveReview: Risk-Aware AI Code Review for Business-Critical Systems](media/livereview-banner.png)](https://hexmos.com/livereview)
